@@ -1,0 +1,143 @@
+site_name: jaxfolio
+site_description: >-
+  Differentiable portfolio optimization and options strategies, powered by JAX —
+  traditional, learning-based, and graph-based methods on a single autodiff core.
+site_author: jaxfolio contributors
+site_url: https://bravant-oss.github.io/jaxfolio/
+repo_name: bravant-oss/jaxfolio
+repo_url: https://github.com/bravant-oss/jaxfolio
+copyright: Copyright &copy; jaxfolio contributors — MIT License
+
+docs_dir: docs
+
+theme:
+  name: material
+  logo: logo.svg
+  favicon: logo.svg
+  icon:
+    repo: fontawesome/brands/github
+  font:
+    text: IBM Plex Mono
+    code: IBM Plex Mono
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+
+extra_css:
+  - stylesheets/extra.css
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/bravant-oss/jaxfolio
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/jaxfolio/
+  generator: false
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      title: On this page
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: numpy
+            show_root_heading: true
+            show_root_full_path: false
+            show_source: true
+            show_signature_annotations: true
+            separate_signature: true
+            signature_crossrefs: true
+            merge_init_into_class: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            filters: ["!^_"]
+            docstring_section_style: table
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Installation: getting-started/installation.md
+      - Quickstart: getting-started/quickstart.md
+      - Core concepts: getting-started/concepts.md
+  - User guide:
+      - Optimizers: guide/optimizers.md
+      - Backtesting: guide/backtesting.md
+      - Options: guide/options.md
+      - LLM strategies: guide/llm.md
+      - Custom strategies: guide/custom-strategies.md
+      - Data: guide/data.md
+      - Visualization: guide/visualization.md
+  - API reference:
+      - Overview: reference/index.md
+      - Optimizers: reference/optimizers.md
+      - Backtest: reference/backtest.md
+      - Options: reference/options.md
+      - LLM: reference/llm.md
+      - Toolkit &amp; custom: reference/toolkit.md
+      - Data &amp; moments: reference/data.md
+      - Visualization: reference/viz.md
+      - Types &amp; registry: reference/types.md
