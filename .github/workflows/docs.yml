@@ -17,17 +17,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      pages: write        # lets configure-pages enable Pages on first run
-      id-token: write
     steps:
       - uses: actions/checkout@v4
-      - name: Configure Pages
-        # enablement: true attempts to turn on Pages automatically, so a fresh
-        # repo/fork does not need the settings toggled by hand first.
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
