@@ -89,6 +89,23 @@ Publication-quality dark-themed plots for every stage of the workflow.
 
 </div>
 
+## Benchmark
+
+Because every constrained optimizer is the *same* cached JIT kernel with a
+different objective, a rolling-rebalance backtest compiles once and reuses the
+compiled solve at every rebalance. jaxfolio matches the dedicated QP solvers'
+optimum while being the fastest on minimum-variance and risk parity — and
+competitive on maximum-Sharpe.
+
+<figure markdown>
+  ![jaxfolio benchmark against other portfolio-optimization libraries](img/benchmark.png)
+  <figcaption>
+    Amortized solve time over a 60-rebalance backtest — jaxfolio vs. PyPortfolioOpt,
+    Riskfolio-Lib, skfolio, CVXPY, and SciPy, all fed identical sample moments.
+    Reproduce it in <code>examples/benchmark</code>.
+  </figcaption>
+</figure>
+
 ## Quickstart
 
 ```python

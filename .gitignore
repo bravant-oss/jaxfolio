@@ -26,7 +26,7 @@ site/
 # Generated artifacts
 *.png
 !docs/**/*.png
-examples/output/
+examples/**/output/
 
 # OS / editors
 .DS_Store

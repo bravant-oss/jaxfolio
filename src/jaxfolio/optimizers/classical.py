@@ -2,9 +2,13 @@
 
 All optimizers share the ``method(returns, ...) -> PortfolioResult`` shape and
 delegate constrained problems to the projected-gradient solver in
-:mod:`jaxfolio.optimizers.base`. Closed-form solutions are used where they exist
-(unconstrained min-variance, tangency portfolio) and reported alongside the
-constrained result for reference.
+:mod:`jaxfolio.optimizers.base`. Objectives are defined as *module-level*
+functions ``objective(w, params)`` (rather than per-call closures) so the
+solver's jit cache hits across repeated calls — e.g. every rebalance of a
+backtest recompiles nothing after the first solve.
+
+Closed-form / exact solvers are used where they exist (inverse-volatility,
+risk-parity coordinate descent) and reported alongside the constrained result.
 """
 
 from __future__ import annotations
@@ -18,9 +22,9 @@ from jaxfolio.moments.estimators import (
     sample_covariance,
 )
 from jaxfolio.optimizers.base import (
-    make_projection,
+    select_projection,
     sharpe_ratio,
-    solve_projected_gradient,
+    solve_constrained,
 )
 from jaxfolio.results import finalize_result, moments
 from jaxfolio.types import OptimizerConfig, PortfolioResult
@@ -28,6 +32,47 @@ from jaxfolio.types import OptimizerConfig, PortfolioResult
 Array = jnp.ndarray
 
 
+# --------------------------------------------------------------------------- #
+# Module-level objectives — objective(w, params) -> scalar to minimize.
+# ``params`` holds only traced arrays, so changing l2/risk-aversion/rf never
+# forces a recompile; only the objective identity and n-assets shape do.
+# --------------------------------------------------------------------------- #
+def _minvar_objective(w: Array, p) -> Array:
+    return w @ p["cov"] @ w + p["l2"] * jnp.sum(w**2)
+
+
+def _meanvar_objective(w: Array, p) -> Array:
+    util = w @ p["mu"] - 0.5 * p["risk_aversion"] * (w @ p["cov"] @ w)
+    return -util + p["l2"] * jnp.sum(w**2)
+
+
+def _sharpe_objective(w: Array, p) -> Array:
+    return -sharpe_ratio(w, p["mu"], p["cov"], p["rf"]) + p["l2"] * jnp.sum(w**2)
+
+
+def _maxdiv_objective(w: Array, p) -> Array:
+    weighted_vol = w @ p["vol"]
+    port_vol = jnp.sqrt(jnp.clip(w @ p["cov"] @ w, 1e-18, None))
+    return -(weighted_vol / port_vol) + p["l2"] * jnp.sum(w**2)
+
+
+def _kelly_objective(w: Array, p) -> Array:
+    growth = jnp.log1p(jnp.clip(p["mat"] @ w, -0.999, None))
+    return -jnp.mean(growth) + p["l2"] * jnp.sum(w**2)
+
+
+def _cvar_objective(z: Array, p) -> Array:
+    # z packs (weights, tau); project only the weight-block (aux projection).
+    w = z[:-1]
+    tau = z[-1]
+    losses = -(p["mat"] @ w)  # loss = negative return
+    cvar = tau + p["scale"] * jnp.sum(jnp.maximum(losses - tau, 0.0))
+    return cvar + p["l2"] * jnp.sum(w**2)
+
+
+# --------------------------------------------------------------------------- #
+# Helpers
+# --------------------------------------------------------------------------- #
 def _finalize(
     w: Array,
     names: list[str],
@@ -44,6 +89,16 @@ def _finalize(
 def _moments(returns, cov_estimator=None):
     """Return ``(mu, cov, names, matrix)`` from a returns object."""
     return moments(returns, cov_estimator)
+
+
+def _solver_kwargs(config: OptimizerConfig) -> dict:
+    """Common solver settings pulled from an OptimizerConfig."""
+    return {
+        "solver": config.solver,
+        "learning_rate": config.learning_rate,
+        "max_iter": config.max_iter,
+        "tol": config.tol,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -72,25 +127,23 @@ def minimum_variance(
 ) -> PortfolioResult:
     """Global minimum-variance portfolio.
 
-    Solves ``min w' Sigma w`` subject to the configured constraints via projected
-    gradient. For the unconstrained long-only case this converges to the exact
+    Solves ``min w' Sigma w`` subject to the configured constraints via the
+    spectral projected-gradient solver, which converges to the exact
     minimum-variance frontier vertex.
     """
     config = config or OptimizerConfig()
     mu, cov, names, _ = _moments(returns)
     n = len(names)
 
-    def objective(w: Array) -> Array:
-        return w @ cov @ w + config.l2_reg * jnp.sum(w**2)
-
-    projection = make_projection(config.long_only, config.bounds())
-    w, info = solve_projected_gradient(
-        objective,
+    projection, pparams = select_projection(config.long_only, config.bounds())
+    params = {"cov": cov, "l2": jnp.asarray(config.l2_reg)}
+    w, info = solve_constrained(
+        _minvar_objective,
+        params,
         jnp.full(n, 1.0 / n),
         projection,
-        learning_rate=config.learning_rate,
-        max_iter=config.max_iter,
-        tol=config.tol,
+        pparams,
+        **_solver_kwargs(config),
     )
     return _finalize(
         w,
@@ -118,18 +171,20 @@ def mean_variance(
     mu, cov, names, _ = _moments(returns)
     n = len(names)
 
-    def objective(w: Array) -> Array:
-        util = w @ mu - 0.5 * risk_aversion * (w @ cov @ w)
-        return -util + config.l2_reg * jnp.sum(w**2)
-
-    projection = make_projection(config.long_only, config.bounds())
-    w, info = solve_projected_gradient(
-        objective,
+    projection, pparams = select_projection(config.long_only, config.bounds())
+    params = {
+        "mu": mu,
+        "cov": cov,
+        "risk_aversion": jnp.asarray(risk_aversion),
+        "l2": jnp.asarray(config.l2_reg),
+    }
+    w, info = solve_constrained(
+        _meanvar_objective,
+        params,
         jnp.full(n, 1.0 / n),
         projection,
-        learning_rate=config.learning_rate,
-        max_iter=config.max_iter,
-        tol=config.tol,
+        pparams,
+        **_solver_kwargs(config),
     )
     return _finalize(
         w,
@@ -156,17 +211,15 @@ def maximum_sharpe(
     n = len(names)
     rf = config.risk_free_rate
 
-    def objective(w: Array) -> Array:
-        return -sharpe_ratio(w, mu, cov, rf) + config.l2_reg * jnp.sum(w**2)
-
-    projection = make_projection(config.long_only, config.bounds())
-    w, info = solve_projected_gradient(
-        objective,
+    projection, pparams = select_projection(config.long_only, config.bounds())
+    params = {"mu": mu, "cov": cov, "rf": jnp.asarray(rf), "l2": jnp.asarray(config.l2_reg)}
+    w, info = solve_constrained(
+        _sharpe_objective,
+        params,
         jnp.full(n, 1.0 / n),
         projection,
-        learning_rate=config.learning_rate,
-        max_iter=config.max_iter,
-        tol=config.tol,
+        pparams,
+        **_solver_kwargs(config),
     )
     return _finalize(
         w,
@@ -193,19 +246,15 @@ def maximum_diversification(
     n = len(names)
     vol = jnp.sqrt(jnp.diag(cov))
 
-    def objective(w: Array) -> Array:
-        weighted_vol = w @ vol
-        port_vol = jnp.sqrt(jnp.clip(w @ cov @ w, 1e-18, None))
-        return -(weighted_vol / port_vol) + config.l2_reg * jnp.sum(w**2)
-
-    projection = make_projection(config.long_only, config.bounds())
-    w, info = solve_projected_gradient(
-        objective,
+    projection, pparams = select_projection(config.long_only, config.bounds())
+    params = {"cov": cov, "vol": vol, "l2": jnp.asarray(config.l2_reg)}
+    w, info = solve_constrained(
+        _maxdiv_objective,
+        params,
         jnp.full(n, 1.0 / n),
         projection,
-        learning_rate=config.learning_rate,
-        max_iter=config.max_iter,
-        tol=config.tol,
+        pparams,
+        **_solver_kwargs(config),
     )
     return _finalize(
         w,
@@ -287,18 +336,15 @@ def kelly(
     mu, cov, names, mat = _moments(returns)
     n = len(names)
 
-    def objective(w: Array) -> Array:
-        growth = jnp.log1p(jnp.clip(mat @ w, -0.999, None))
-        return -jnp.mean(growth) + config.l2_reg * jnp.sum(w**2)
-
-    projection = make_projection(config.long_only, config.bounds())
-    w, info = solve_projected_gradient(
-        objective,
+    projection, pparams = select_projection(config.long_only, config.bounds())
+    params = {"mat": mat, "l2": jnp.asarray(config.l2_reg)}
+    w, info = solve_constrained(
+        _kelly_objective,
+        params,
         jnp.full(n, 1.0 / n),
         projection,
-        learning_rate=config.learning_rate,
-        max_iter=config.max_iter,
-        tol=config.tol,
+        pparams,
+        **_solver_kwargs(config),
     )
     return _finalize(
         w,
@@ -321,6 +367,10 @@ def min_cvar(
     Minimizes CVaR at confidence ``alpha`` using the smooth auxiliary-variable
     formulation ``CVaR = tau + 1/((1-alpha)T) sum(max(loss - tau, 0))``, jointly
     optimizing weights ``w`` and the VaR threshold ``tau``.
+
+    The packed ``(w, tau)`` variable (``tau`` unconstrained) and the piecewise
+    objective are ill-suited to a single scalar Barzilai-Borwein step, so this
+    optimizer uses the Adam solver regardless of ``config.solver``.
     """
     config = config or OptimizerConfig()
     mu, cov, names, mat = _moments(returns)
@@ -328,32 +378,25 @@ def min_cvar(
     t = mat.shape[0]
     scale = 1.0 / ((1.0 - alpha) * t)
 
-    projection = make_projection(config.long_only, config.bounds())
+    projection, pparams = select_projection(config.long_only, config.bounds(), aux=True)
+    params = {"mat": mat, "scale": jnp.asarray(scale), "l2": jnp.asarray(config.l2_reg)}
 
-    # Pack (w, tau) into a single vector; project only the w-block.
-    def unpack(z: Array) -> tuple[Array, Array]:
-        return z[:-1], z[-1]
-
-    def objective(z: Array) -> Array:
-        w, tau = unpack(z)
-        losses = -(mat @ w)  # loss = negative return
-        cvar = tau + scale * jnp.sum(jnp.maximum(losses - tau, 0.0))
-        return cvar + config.l2_reg * jnp.sum(w**2)
-
-    def proj_z(z: Array) -> Array:
-        w, tau = unpack(z)
-        return jnp.concatenate([projection(w), tau[None]])
-
+    # Pack (w, tau) into a single vector; tau starts at 0.
     z0 = jnp.concatenate([jnp.full(n, 1.0 / n), jnp.zeros(1)])
-    z, info = solve_projected_gradient(
-        objective,
+    lr = 1e-2 if config.learning_rate is None else config.learning_rate
+    z, info = solve_constrained(
+        _cvar_objective,
+        params,
         z0,
-        proj_z,
-        learning_rate=config.learning_rate,
+        projection,
+        pparams,
+        solver="adam",
+        learning_rate=lr,
         max_iter=config.max_iter,
         tol=config.tol,
     )
-    w, tau = unpack(z)
+    w = z[:-1]
+    tau = z[-1]
     losses = -(mat @ w)
     cvar = float(tau + scale * jnp.sum(jnp.maximum(losses - tau, 0.0)))
     return _finalize(
@@ -438,18 +481,16 @@ def black_litterman(
     else:
         post_mu = pi
 
-    # Mean-variance optimize with the posterior returns.
-    def objective(w: Array) -> Array:
-        return -(w @ post_mu - 0.5 * risk_aversion * (w @ cov @ w)) + config.l2_reg * jnp.sum(w**2)
-
-    projection = make_projection(config.long_only, config.bounds())
-    w, info = solve_projected_gradient(
-        objective,
-        w_mkt,
-        projection,
-        learning_rate=config.learning_rate,
-        max_iter=config.max_iter,
-        tol=config.tol,
+    # Mean-variance optimize with the posterior returns (reuse the shared objective).
+    projection, pparams = select_projection(config.long_only, config.bounds())
+    params = {
+        "mu": post_mu,
+        "cov": cov,
+        "risk_aversion": jnp.asarray(risk_aversion),
+        "l2": jnp.asarray(config.l2_reg),
+    }
+    w, info = solve_constrained(
+        _meanvar_objective, params, w_mkt, projection, pparams, **_solver_kwargs(config)
     )
     mu_sample = mean_returns(mat)
     return _finalize(
