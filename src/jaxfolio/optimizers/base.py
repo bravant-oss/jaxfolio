@@ -310,7 +310,12 @@ def solve_projected_gradient(
     :func:`solve_constrained`. Returns ``(weights, info)``.
     """
     w, iters = _run_solver(
-        objective, projection, w0, solver=solver, learning_rate=learning_rate, max_iter=max_iter,
+        objective,
+        projection,
+        w0,
+        solver=solver,
+        learning_rate=learning_rate,
+        max_iter=max_iter,
         tol=tol,
     )
     return w, {"iterations": iters}

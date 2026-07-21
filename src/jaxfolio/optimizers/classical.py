@@ -138,7 +138,11 @@ def minimum_variance(
     projection, pparams = select_projection(config.long_only, config.bounds())
     params = {"cov": cov, "l2": jnp.asarray(config.l2_reg)}
     w, info = solve_constrained(
-        _minvar_objective, params, jnp.full(n, 1.0 / n), projection, pparams,
+        _minvar_objective,
+        params,
+        jnp.full(n, 1.0 / n),
+        projection,
+        pparams,
         **_solver_kwargs(config),
     )
     return _finalize(
@@ -175,7 +179,11 @@ def mean_variance(
         "l2": jnp.asarray(config.l2_reg),
     }
     w, info = solve_constrained(
-        _meanvar_objective, params, jnp.full(n, 1.0 / n), projection, pparams,
+        _meanvar_objective,
+        params,
+        jnp.full(n, 1.0 / n),
+        projection,
+        pparams,
         **_solver_kwargs(config),
     )
     return _finalize(
@@ -206,7 +214,11 @@ def maximum_sharpe(
     projection, pparams = select_projection(config.long_only, config.bounds())
     params = {"mu": mu, "cov": cov, "rf": jnp.asarray(rf), "l2": jnp.asarray(config.l2_reg)}
     w, info = solve_constrained(
-        _sharpe_objective, params, jnp.full(n, 1.0 / n), projection, pparams,
+        _sharpe_objective,
+        params,
+        jnp.full(n, 1.0 / n),
+        projection,
+        pparams,
         **_solver_kwargs(config),
     )
     return _finalize(
@@ -237,7 +249,11 @@ def maximum_diversification(
     projection, pparams = select_projection(config.long_only, config.bounds())
     params = {"cov": cov, "vol": vol, "l2": jnp.asarray(config.l2_reg)}
     w, info = solve_constrained(
-        _maxdiv_objective, params, jnp.full(n, 1.0 / n), projection, pparams,
+        _maxdiv_objective,
+        params,
+        jnp.full(n, 1.0 / n),
+        projection,
+        pparams,
         **_solver_kwargs(config),
     )
     return _finalize(
@@ -323,7 +339,11 @@ def kelly(
     projection, pparams = select_projection(config.long_only, config.bounds())
     params = {"mat": mat, "l2": jnp.asarray(config.l2_reg)}
     w, info = solve_constrained(
-        _kelly_objective, params, jnp.full(n, 1.0 / n), projection, pparams,
+        _kelly_objective,
+        params,
+        jnp.full(n, 1.0 / n),
+        projection,
+        pparams,
         **_solver_kwargs(config),
     )
     return _finalize(
@@ -365,8 +385,15 @@ def min_cvar(
     z0 = jnp.concatenate([jnp.full(n, 1.0 / n), jnp.zeros(1)])
     lr = 1e-2 if config.learning_rate is None else config.learning_rate
     z, info = solve_constrained(
-        _cvar_objective, params, z0, projection, pparams,
-        solver="adam", learning_rate=lr, max_iter=config.max_iter, tol=config.tol,
+        _cvar_objective,
+        params,
+        z0,
+        projection,
+        pparams,
+        solver="adam",
+        learning_rate=lr,
+        max_iter=config.max_iter,
+        tol=config.tol,
     )
     w = z[:-1]
     tau = z[-1]

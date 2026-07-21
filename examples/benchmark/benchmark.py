@@ -141,16 +141,47 @@ def run(
                 val, label, direction = quality(problem, w, ctx)
                 diff = float(np.max(np.abs(w - ref_weights[problem])))
                 rows.append(
-                    Row(problem, adapter.name, adapter.is_reference, secs, val, label,
-                        direction, diff, "ok")
+                    Row(
+                        problem,
+                        adapter.name,
+                        adapter.is_reference,
+                        secs,
+                        val,
+                        label,
+                        direction,
+                        diff,
+                        "ok",
+                    )
                 )
                 weights_by[(problem, adapter.name)] = w
             except Unsupported as exc:
-                rows.append(Row(problem, adapter.name, adapter.is_reference,
-                                np.nan, np.nan, "", "", np.nan, f"unsupported: {exc}"))
+                rows.append(
+                    Row(
+                        problem,
+                        adapter.name,
+                        adapter.is_reference,
+                        np.nan,
+                        np.nan,
+                        "",
+                        "",
+                        np.nan,
+                        f"unsupported: {exc}",
+                    )
+                )
             except Exception as exc:  # noqa: BLE001 - report, don't abort the sweep
-                rows.append(Row(problem, adapter.name, adapter.is_reference,
-                                np.nan, np.nan, "", "", np.nan, f"error: {exc}"))
+                rows.append(
+                    Row(
+                        problem,
+                        adapter.name,
+                        adapter.is_reference,
+                        np.nan,
+                        np.nan,
+                        "",
+                        "",
+                        np.nan,
+                        f"error: {exc}",
+                    )
+                )
     return rows, weights_by, ref_name
 
 
@@ -171,16 +202,25 @@ def print_tables(rows: list[Row], ref_name: str) -> pd.DataFrame:
         table = []
         for _, r in sub.iterrows():
             if r["status"] != "ok":
-                table.append({"library": r["library"], "ms": None,
-                              label: None, "Δw vs jaxfolio": None, "note": r["status"]})
+                table.append(
+                    {
+                        "library": r["library"],
+                        "ms": None,
+                        label: None,
+                        "Δw vs jaxfolio": None,
+                        "note": r["status"],
+                    }
+                )
                 continue
-            table.append({
-                "library": r["library"] + ("  (ref)" if r["is_reference"] else ""),
-                "ms": round(r["ms"], 3),
-                label: round(r["quality_value"], 4),
-                "Δw vs jaxfolio": round(r["max_weight_diff"], 4),
-                "note": "",
-            })
+            table.append(
+                {
+                    "library": r["library"] + ("  (ref)" if r["is_reference"] else ""),
+                    "ms": round(r["ms"], 3),
+                    label: round(r["quality_value"], 4),
+                    "Δw vs jaxfolio": round(r["max_weight_diff"], 4),
+                    "note": "",
+                }
+            )
         out = pd.DataFrame(table).set_index("library")
         print(out.to_string(na_rep="—"))
 
@@ -201,10 +241,7 @@ def plot_speed(df: pd.DataFrame) -> None:
         sub = ok[ok["problem"] == problem].sort_values("ms")
         libs = sub["library"].tolist()
         ms = sub["ms"].tolist()
-        colors = [
-            theme.CATEGORICAL[0] if ref else theme.INK_MUTED
-            for ref in sub["is_reference"]
-        ]
+        colors = [theme.CATEGORICAL[0] if ref else theme.INK_MUTED for ref in sub["is_reference"]]
         y = np.arange(len(libs))
         ax.barh(y, ms, color=colors, edgecolor=theme.SURFACE)
         ax.set_yticks(y)
@@ -214,8 +251,15 @@ def plot_speed(df: pd.DataFrame) -> None:
         ax.set_title(PROBLEM_TITLES[problem])
         ax.invert_yaxis()
         for yi, v in zip(y, ms, strict=True):
-            ax.text(v, yi, f"  {v:.2f} ms", va="center", ha="left",
-                    color=theme.INK_SECONDARY, fontsize=8)
+            ax.text(
+                v,
+                yi,
+                f"  {v:.2f} ms",
+                va="center",
+                ha="left",
+                color=theme.INK_SECONDARY,
+                fontsize=8,
+            )
         ax.margins(x=0.25)
 
     fig.suptitle("Solve time: jaxfolio vs. popular portfolio-optimization libraries")
@@ -240,8 +284,15 @@ def plot_weight_agreement(weights_by, ref_name: str, assets: list[str]) -> None:
     width = 0.8 / max(len(libs), 1)
     for i, lib in enumerate(libs):
         w = weights_by[(problem, lib)]
-        ax.bar(x + i * width, w, width, label=lib, color=theme.color(i),
-               edgecolor=theme.SURFACE, linewidth=0.4)
+        ax.bar(
+            x + i * width,
+            w,
+            width,
+            label=lib,
+            color=theme.color(i),
+            edgecolor=theme.SURFACE,
+            linewidth=0.4,
+        )
     ax.set_xticks(x + width * (len(libs) - 1) / 2)
     ax.set_xticklabels(assets, rotation=45, ha="right")
     ax.set_ylabel("weight")
@@ -258,10 +309,7 @@ def rolling_windows(
     returns: pd.DataFrame, *, lookback: int = 252, step: int = 21
 ) -> list[pd.DataFrame]:
     """Trailing look-back windows on a fixed monthly rebalance cadence."""
-    return [
-        returns.iloc[t - lookback : t]
-        for t in range(lookback, len(returns) + 1, step)
-    ]
+    return [returns.iloc[t - lookback : t] for t in range(lookback, len(returns) + 1, step)]
 
 
 def run_throughput(
@@ -291,18 +339,35 @@ def run_throughput(
                         adapter.solve(problem, ctx)
                     best = min(best, time.perf_counter() - t0)
                 total = best
-                rows.append({
-                    "problem": problem, "library": adapter.name,
-                    "is_reference": adapter.is_reference, "n_windows": len(contexts),
-                    "total_ms": total * 1e3, "per_solve_ms": total / len(contexts) * 1e3,
-                    "status": "ok",
-                })
+                rows.append(
+                    {
+                        "problem": problem,
+                        "library": adapter.name,
+                        "is_reference": adapter.is_reference,
+                        "n_windows": len(contexts),
+                        "total_ms": total * 1e3,
+                        "per_solve_ms": total / len(contexts) * 1e3,
+                        "status": "ok",
+                    }
+                )
             except Unsupported as exc:
-                rows.append({"problem": problem, "library": adapter.name,
-                             "is_reference": adapter.is_reference, "status": f"unsupported: {exc}"})
+                rows.append(
+                    {
+                        "problem": problem,
+                        "library": adapter.name,
+                        "is_reference": adapter.is_reference,
+                        "status": f"unsupported: {exc}",
+                    }
+                )
             except Exception as exc:  # noqa: BLE001
-                rows.append({"problem": problem, "library": adapter.name,
-                             "is_reference": adapter.is_reference, "status": f"error: {exc}"})
+                rows.append(
+                    {
+                        "problem": problem,
+                        "library": adapter.name,
+                        "is_reference": adapter.is_reference,
+                        "status": f"error: {exc}",
+                    }
+                )
     return pd.DataFrame(rows)
 
 
@@ -315,12 +380,14 @@ def print_throughput_tables(df: pd.DataFrame) -> None:
         table = []
         for _, r in sub.iterrows():
             ok = r["status"] == "ok"
-            table.append({
-                "library": r["library"] + ("  (ref)" if r["is_reference"] else ""),
-                "total ms": round(r["total_ms"], 2) if ok else None,
-                "ms/solve": round(r["per_solve_ms"], 3) if ok else None,
-                "note": "" if ok else r["status"],
-            })
+            table.append(
+                {
+                    "library": r["library"] + ("  (ref)" if r["is_reference"] else ""),
+                    "total ms": round(r["total_ms"], 2) if ok else None,
+                    "ms/solve": round(r["per_solve_ms"], 3) if ok else None,
+                    "note": "" if ok else r["status"],
+                }
+            )
         print(pd.DataFrame(table).set_index("library").to_string(na_rep="—"))
 
 
@@ -349,8 +416,9 @@ def plot_throughput(df: pd.DataFrame) -> None:
         ax.set_title(PROBLEM_TITLES[problem])
         ax.invert_yaxis()
         for yi, v in zip(y, ms, strict=True):
-            ax.text(v, yi, f"  {v:.3f}", va="center", ha="left",
-                    color=theme.INK_SECONDARY, fontsize=8)
+            ax.text(
+                v, yi, f"  {v:.3f}", va="center", ha="left", color=theme.INK_SECONDARY, fontsize=8
+            )
         ax.margins(x=0.28)
 
     fig.suptitle(f"Amortized solve time over {n} rolling rebalances (a backtest workload)")
@@ -377,8 +445,7 @@ def plot_hero(single_df: pd.DataFrame, tput_df: pd.DataFrame) -> None:
     # generic SLSQP does not reach ERC, so its Δw there reflects a weaker solver,
     # not a moment/setup difference — reporting it would misstate the agreement.
     unique_opt = single_df[
-        (single_df["status"] == "ok")
-        & (single_df["problem"].isin(["min_variance", "max_sharpe"]))
+        (single_df["status"] == "ok") & (single_df["problem"].isin(["min_variance", "max_sharpe"]))
     ]
     max_dw = float(unique_opt["max_weight_diff"].max())
 
@@ -396,8 +463,9 @@ def plot_hero(single_df: pd.DataFrame, tput_df: pd.DataFrame) -> None:
         ax.set_title(PROBLEM_TITLES[problem])
         ax.invert_yaxis()
         for yi, v in zip(y, ms, strict=True):
-            ax.text(v, yi, f"  {v:.2f}", va="center", ha="left",
-                    color=theme.INK_SECONDARY, fontsize=8.5)
+            ax.text(
+                v, yi, f"  {v:.2f}", va="center", ha="left", color=theme.INK_SECONDARY, fontsize=8.5
+            )
         ax.margins(x=0.30)
 
     fig.suptitle(
@@ -405,12 +473,17 @@ def plot_hero(single_df: pd.DataFrame, tput_df: pd.DataFrame) -> None:
         fontsize=13,
     )
     fig.text(
-        0.5, -0.02,
+        0.5,
+        -0.02,
         "Every library is given identical sample moments and reaches the same optimum on "
         f"minimum-variance and maximum-Sharpe (max weight difference < {max(max_dw, 0.001):.3f}). "
         "Best-of-3 timing; jaxfolio compiles its JIT kernel once (warm-up, not charged) then "
         "reuses it across all rebalances.",
-        ha="center", va="top", fontsize=8, color=theme.INK_MUTED, wrap=True,
+        ha="center",
+        va="top",
+        fontsize=8,
+        color=theme.INK_MUTED,
+        wrap=True,
     )
     fig.savefig(OUT / "benchmark.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -449,8 +522,9 @@ def main() -> None:
 
     print(f"\nSaved tables (CSV) and charts -> {OUT}/")
     print("  benchmark_results.csv · benchmark_throughput.csv")
-    print("  benchmark.png · benchmark_speed.png · benchmark_weights.png ·"
-          " benchmark_throughput.png")
+    print(
+        "  benchmark.png · benchmark_speed.png · benchmark_weights.png · benchmark_throughput.png"
+    )
 
 
 if __name__ == "__main__":

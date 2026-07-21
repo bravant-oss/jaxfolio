@@ -150,7 +150,11 @@ class ScipyAdapter(Adapter):
             raise Unsupported(problem)
 
         res = minimize(
-            obj, w0, method="SLSQP", bounds=bounds, constraints=[budget],
+            obj,
+            w0,
+            method="SLSQP",
+            bounds=bounds,
+            constraints=[budget],
             options={"maxiter": 500, "ftol": 1e-12},
         )
         return _normalize(res.x)
