@@ -86,6 +86,38 @@ viz.save(viz.dashboard(results, returns), "dashboard.png")
 | **Backtest** | walk-forward engine · costs & turnover · Sharpe / Sortino / Calmar / VaR / CVaR / drawdown |
 | **Data** | synthetic GBM · CSV · Parquet · Yahoo Finance · option chains |
 
+## Benchmark
+
+How does jaxfolio compare to the established Python optimizers? On the workload
+that matters — a rolling-rebalance backtest — its cached JIT kernel compiles once
+and is then reused across every solve, so jaxfolio is the fastest on
+minimum-variance and risk parity and competitive on maximum-Sharpe, while landing
+on the *same* optimum as the dedicated QP solvers.
+
+<p align="center">
+  <img src="docs/img/benchmark.png" alt="jaxfolio vs other portfolio-optimization libraries" width="880">
+</p>
+
+Amortized solve time (ms, lower is better) over a 60-rebalance backtest of 20
+assets. Every library is fed **identical sample moments**, so the inputs — and
+the resulting portfolios — are the same:
+
+| ms / solve | Min-Variance | Max-Sharpe | Risk-Parity |
+|---|--:|--:|--:|
+| **jaxfolio** | **0.22** | 2.82 | **0.57** |
+| [CVXPY](https://www.cvxpy.org/) | 1.59 | **1.61** | 2.28 |
+| [PyPortfolioOpt](https://github.com/robertmartin8/PyPortfolioOpt) | 1.52 | 2.00 | — |
+| [skfolio](https://skfolio.org/) | 3.15 | 3.70 | 3.82 |
+| [Riskfolio-Lib](https://github.com/dcajasn/Riskfolio-Lib) | 8.61 | 9.45 | 9.42 |
+| [SciPy](https://scipy.org/) (SLSQP) | 19.67 | 4.68 | 5.33 |
+
+All methods reach the same optimum on min-variance and max-Sharpe (max weight
+difference < 0.001); jaxfolio's risk parity uses exact ERC coordinate descent.
+It's a fair scoreboard, not a victory lap — CVXPY edges jaxfolio on max-Sharpe.
+Reproduce it — plus a single cold-solve comparison and the per-library adapters —
+in [`examples/benchmark`](examples/benchmark). *(Numbers from an Apple-silicon
+run; your absolute times will differ, the ranking holds.)*
+
 ## Options
 
 ```python

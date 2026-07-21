@@ -30,10 +30,20 @@ class OptimizerConfig:
         without also having to set bounds. Set this to override those defaults.
     max_iter:
         Maximum projected-gradient iterations.
+    solver:
+        Which projected-gradient solver to use. ``"spg"`` (default) is a
+        spectral projected-gradient method with Barzilai-Borwein step sizes: it
+        needs no learning-rate tuning and converges to the constrained optimum
+        (matching a dedicated QP solver) in far fewer iterations. ``"adam"``
+        keeps the smooth optax-Adam dynamics, which are preferable when
+        differentiating *through* the optimizer to train an allocation policy.
     learning_rate:
-        Step size for the optax optimizer inside the solver.
+        Step size for the solver. ``None`` (default) lets the solver pick it
+        automatically — a curvature-based (``1/L``) initial step for ``"spg"``,
+        or ``1e-2`` for ``"adam"``. Set a float to override.
     tol:
-        Convergence tolerance on the weight update norm.
+        Convergence tolerance. For ``"spg"`` this is the projected-gradient
+        (KKT stationarity) norm; for ``"adam"`` it is the weight-update norm.
     l2_reg:
         Optional L2 penalty on weights (encourages diversification).
     """
@@ -42,8 +52,9 @@ class OptimizerConfig:
     long_only: bool = True
     weight_bounds: tuple[float, float] | None = None
     max_iter: int = 2000
-    learning_rate: float = 1e-2
-    tol: float = 1e-8
+    solver: str = "spg"
+    learning_rate: float | None = None
+    tol: float = 1e-7
     l2_reg: float = 0.0
 
     def bounds(self) -> tuple[float, float]:

@@ -103,10 +103,16 @@ $$
 w_{t+1} = \Pi_{\mathcal{C}}\!\bigl(w_t - \eta\, \nabla_w\, f(w_t)\bigr)
 $$
 
-Take an [Adam](https://optax.readthedocs.io) gradient step on an unconstrained
-objective `f(w)`, then **project** the weights back onto the feasible set
-\(\mathcal{C}\). The loop runs inside `jax.lax.while_loop`, so the entire solve
-compiles to a single JIT kernel:
+Take a gradient step on an unconstrained objective `f(w)`, then **project** the
+weights back onto the feasible set \(\mathcal{C}\). The default solver (`"spg"`)
+uses a spectral projected-gradient method with Barzilai–Borwein step sizes — it
+tunes its own step from the local curvature and converges to the same optimum a
+dedicated QP solver finds, in a few hundred iterations and with no learning-rate
+to set. (An [Adam](https://optax.readthedocs.io) solver is also available via
+`OptimizerConfig(solver="adam")`, preferred when differentiating *through* the
+optimizer.) The loop runs inside `jax.lax.while_loop`, so the entire solve
+compiles to a single JIT kernel — cached per problem shape, so repeated solves
+(e.g. every rebalance of a backtest) reuse it:
 
 ```python
 from jaxfolio import toolkit as tk
@@ -159,8 +165,9 @@ cfg = OptimizerConfig(
     risk_free_rate=0.0,       # per-period, for Sharpe-style objectives
     l2_reg=1e-3,              # optional diversification penalty
     max_iter=2000,
-    learning_rate=1e-2,
-    tol=1e-8,
+    solver="spg",             # spectral projected gradient (default); or "adam"
+    learning_rate=None,       # None = auto step from local curvature
+    tol=1e-7,                 # projected-gradient (KKT) stationarity tolerance
 )
 
 jf.maximum_sharpe(returns, config=cfg)

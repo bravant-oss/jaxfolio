@@ -42,7 +42,9 @@ from jaxfolio.optimizers.base import (
     portfolio_return,
     portfolio_variance,
     portfolio_volatility,
+    select_projection,
     sharpe_ratio,
+    solve_constrained,
     solve_projected_gradient,
 )
 from jaxfolio.results import PERIODS_PER_YEAR, equal_start, finalize_result, moments
@@ -67,6 +69,8 @@ __all__ = [
     "softmax_weights",
     # solver core
     "solve_projected_gradient",
+    "solve_constrained",
+    "select_projection",
     "equal_start",
     # portfolio math
     "portfolio_return",
