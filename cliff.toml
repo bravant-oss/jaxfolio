@@ -1,0 +1,60 @@
+# git-cliff configuration — generates CHANGELOG.md and release notes from the
+# git history (Conventional Commits). Run `git-cliff -o CHANGELOG.md` to refresh
+# the file locally; the release workflow regenerates the notes on every tag.
+# https://git-cliff.org
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to **jaxfolio** are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+This file is generated automatically with [git-cliff](https://git-cliff.org) from
+[Conventional Commits](https://www.conventionalcommits.org).
+\n
+"""
+
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits %}\
+- {{ commit.message | split(pat="\n") | first | upper_first | trim }}\
+{% endfor %}
+{% endfor %}\n
+"""
+
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+protect_breaking_commits = true
+filter_commits = true
+tag_pattern = "v[0-9].*"
+topo_order = false
+sort_commits = "newest"
+
+# Drop noise (merges, version bumps, formatting) from the user-facing changelog.
+skip_tags = ""
+ignore_tags = ""
+
+commit_parsers = [
+  { message = "^fix: lint", skip = true },
+  { message = "^(chore|ci|build)", skip = true },
+  { message = "^Merge", skip = true },
+  { message = "^feat", group = "<!-- 0 -->Features" },
+  { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
+  { message = "^perf", group = "<!-- 2 -->Performance" },
+  { message = "^refactor", group = "<!-- 3 -->Refactor" },
+  { message = "^docs", group = "<!-- 4 -->Documentation" },
+  { message = "^test", group = "<!-- 5 -->Testing" },
+  { body = ".*security", group = "<!-- 6 -->Security" },
+]

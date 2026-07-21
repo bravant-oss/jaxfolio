@@ -19,3 +19,20 @@ jobs:
         run: uv build
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true # tolerate re-runs for an already-published version
+
+  github-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract this version's notes from CHANGELOG.md
+        # The changelog is maintained with git-cliff (`git-cliff -o CHANGELOG.md`);
+        # here we lift the section for the tag being released as the release body.
+        run: awk '/^## \[/{c++} c==1{print} c==2{exit}' CHANGELOG.md > RELEASE_NOTES.md
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
