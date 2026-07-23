@@ -35,6 +35,7 @@ from jaxfolio.options.strategies import (
     straddle,
     strangle,
 )
+from jaxfolio.options.surface import SVIParams, VolSurface, calibrate_svi
 
 __all__ = [
     # pricing
@@ -68,4 +69,8 @@ __all__ = [
     "OverlayBook",
     "covered_call_overlay",
     "collar_overlay",
+    # volatility surface
+    "VolSurface",
+    "SVIParams",
+    "calibrate_svi",
 ]

@@ -113,7 +113,7 @@ viz.save(viz.dashboard(results, returns), "dashboard.png")
 | **Learning** | differentiable MLP Sharpe policy · online exponentiated-gradient |
 | **Graph** | hierarchical risk parity (HRP) · HERC · MST centrality |
 | **LLM (local)** | LLM→Black-Litterman views · news-sentiment tilt · multi-agent debate — all on a local Ollama model, no API keys |
-| **Options** | Black-Scholes pricing · Greeks via autodiff · implied vol · 10+ multi-leg strategies · collar / covered-call overlays |
+| **Options** | Black-Scholes (European) + binomial American w/ discrete dividends · Greeks via autodiff · implied vol · volatility surface (SVI + arb checks) · 10+ multi-leg strategies · collar / covered-call overlays · execution simulator (research, not live) |
 | **Extensible** | register your own strategy · a `toolkit` of reusable building blocks · works everywhere the built-ins do |
 | **Backtest** | walk-forward engine · costs & turnover · Sharpe / Sortino / Calmar / VaR / CVaR / drawdown |
 | **Data** | synthetic GBM · CSV · Parquet · Yahoo Finance · option chains |
@@ -128,6 +128,14 @@ strat = collar(spot=100, put_strike=95, call_strike=110, expiry=0.25, vol=0.22)
 strat.greeks(spot=100, vol=0.22)                 # net delta / gamma / vega / theta / rho
 viz.save(viz.plot_payoff(strat, spot=100), "collar.png")
 ```
+
+Beyond analytics: fit an implied-**volatility surface** (grid interpolation or
+raw-SVI, with butterfly/calendar arbitrage checks), price American options with
+**discrete dividends**, and simulate rolling an overlay through a price path with
+transaction costs via the **execution framework**
+([`jaxfolio.options.execution`](docs/guide/options.md)). The execution layer is a
+research/backtesting simulation against a *modeled* surface — **not** a live
+broker, OMS, or exchange connection ([DISCLAIMER.md](DISCLAIMER.md)).
 
 ## LLM strategies (local models)
 
@@ -208,6 +216,30 @@ uv sync --all-extras
 uv run pytest
 uv run ruff check . && uv run ruff format --check .
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow (pre-commit,
+coverage floor, docstring conventions).
+
+## Versioning, stability & governance
+
+jaxfolio follows [Semantic Versioning](https://semver.org). It is currently in
+the `0.y` (beta) series, so minor releases may still change the API — but every
+public change goes through a documented [deprecation
+cycle](docs/reference/stability.md), and the public surface is exactly what
+`jaxfolio.__all__` and the documented submodules export. Numerical results are
+validated against reference solvers (SciPy, CVXPY, PyPortfolioOpt); see the
+[validation matrix](docs/reference/validation.md).
+
+| | |
+|---|---|
+| **Contributing** | [CONTRIBUTING.md](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) |
+| **Support & policy** | [SUPPORT.md](SUPPORT.md) (Python/dependency support) · [GOVERNANCE.md](GOVERNANCE.md) |
+| **Security** | [SECURITY.md](SECURITY.md) (private disclosure) |
+| **Scope** | [DISCLAIMER.md](DISCLAIMER.md) — research software, **not** investment advice |
+
+> [!WARNING]
+> The **LLM strategies** are experimental research features. Their outputs are
+> **not** investment-quality signals — see [DISCLAIMER.md](DISCLAIMER.md).
 
 <br>
 
