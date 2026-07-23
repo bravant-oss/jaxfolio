@@ -1,5 +1,11 @@
 # LLM
 
+!!! warning "Experimental — not investment advice"
+    The LLM strategies are experimental research prototypes; their outputs are not
+    investment-quality signals and their API may change. They emit an
+    `ExperimentalWarning` on first use. See the
+    [stability policy](stability.md#experimental-features).
+
 Local-model view generation routed through Black–Litterman. See the
 [LLM strategies guide](../guide/llm.md).
 

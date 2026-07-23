@@ -29,11 +29,13 @@ jobs:
         run: uv run ruff format --check .
 
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
@@ -42,10 +44,33 @@ jobs:
           enable-cache: true
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
+      # Core test deps only (data + llm + dev). The heavy reference solvers in
+      # the `validation` extra are exercised in a dedicated job below, not on
+      # every OS/Python combo.
       - name: Install deps
-        run: uv sync --all-extras
+        run: uv sync --extra data --extra llm --extra dev
+      # Coverage floor (fail_under) is enforced from [tool.coverage.report].
       - name: Run tests
         run: uv run pytest --cov=jaxfolio --cov-report=term-missing
+
+  # Numerical-validation matrix against external reference solvers
+  # (SciPy / CVXPY / PyPortfolioOpt). Runs on a single canonical leg because the
+  # reference solvers are heavy and their point is cross-solver agreement, not
+  # cross-platform behavior.
+  validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Install all extras (incl. reference solvers)
+        run: uv sync --all-extras
+      - name: Run validation matrix
+        run: uv run pytest tests/validation -v
 
   build:
     runs-on: ubuntu-latest
