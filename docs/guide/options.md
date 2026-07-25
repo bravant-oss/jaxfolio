@@ -160,3 +160,92 @@ An [`OverlayBook`](../reference/options.md#jaxfolio.options.overlay.OverlayBook)
 holds the per-asset strategies scaled by portfolio weight; `covered_call_overlay`
 writes calls for income, `collar_overlay` bounds each holding between the put and
 call moneyness. Assets without a provided spot are skipped.
+
+## Volatility surfaces
+
+A [`VolSurface`](../reference/options.md#jaxfolio.options.surface.VolSurface)
+turns a discrete grid of implied vols (strikes × expiries) into a smooth,
+callable `iv(strike, ttm)` by interpolating **in total variance**. Build one from
+market prices — which inverts each quote with the Newton
+[`implied_volatility`](../reference/options.md#jaxfolio.options.pricing.implied_volatility)
+solver — or fit a parametric **raw-SVI** slice per expiry.
+
+```python
+import numpy as np
+from jaxfolio.options import VolSurface
+
+strikes = np.array([80, 90, 100, 110, 120.0])
+ttms = np.array([0.1, 0.25, 0.5])
+iv_grid = np.array([                          # one smile row per expiry
+    [0.30, 0.25, 0.22, 0.24, 0.28],
+    [0.29, 0.24, 0.21, 0.23, 0.27],
+    [0.28, 0.23, 0.205, 0.225, 0.26],
+])
+
+surf = VolSurface.from_iv_grid(strikes, ttms, iv_grid, spot=100.0)
+surf.iv(105, 0.3)                 # interpolated vol at an off-grid point
+surf.price(105, 0.3)             # priced off the surface (reuses Black-Scholes)
+surf.greeks(105, 0.3)            # full Greeks at the surface vol
+
+fitted = surf.fit_svi()          # smooth, extrapolating raw-SVI smiles
+surf.arbitrage_report()          # butterfly (convexity) + calendar checks
+```
+
+`arbitrage_report()` flags **butterfly** violations (call price must be convex in
+strike) and **calendar** violations (total variance must not decrease with
+maturity), so you can validate a surface before trading off it.
+
+### Discrete dividends & American exercise
+
+[`binomial_american`](../reference/options.md#jaxfolio.options.pricing.binomial_american)
+prices American-style options on a Cox–Ross–Rubinstein lattice with early
+exercise. It supports both a continuous dividend *yield* (`div=`) and a schedule
+of **discrete cash dividends** via the escrowed-dividend model:
+
+```python
+from jaxfolio.options import binomial_american
+
+# American put with a $3 cash dividend at 6 months (raises the put value):
+binomial_american(100, 100, 1.0, 0.2, rate=0.05, is_call=False,
+                  dividends=[(0.5, 3.0)])
+```
+
+## Execution framework
+
+!!! note "Research simulation, not live trading"
+    This simulates fills against a *modeled* Black–Scholes / surface price with
+    transaction costs. It is a backtesting / research tool — **not** a live
+    broker, order-management system, or exchange connection. Simulated fills,
+    costs, and P&L will differ from live trading. See
+    [DISCLAIMER.md](https://github.com/bravant-oss/jaxfolio/blob/main/DISCLAIMER.md).
+
+The `jaxfolio.options.execution` subpackage adds order/fill accounting, a
+transaction-[`CostModel`](../reference/options.md#jaxfolio.options.execution.costs.CostModel),
+a mark-to-market option book, and an
+[`ExecutionSimulator`](../reference/options.md#jaxfolio.options.execution.book.ExecutionSimulator).
+It is the options analogue of the walk-forward equity backtester:
+
+```python
+import numpy as np
+from jaxfolio.options.execution import (
+    ExecutionSimulator, Instrument, Order, CostModel,
+    simulate_covered_call_roll,
+)
+
+# Trade a single option with costs and mark the book to market.
+sim = ExecutionSimulator(cost_model=CostModel(commission_per_contract=0.65,
+                                              slippage_bps=5.0))
+sim.execute(Order(Instrument("call", 105.0, 0.25), -1.0), spot=100.0, vol=0.2)
+sim.book.net_greeks(100.0, 0.2)     # net position Greeks
+sim.equity(100.0, 0.2)             # cash + mark-to-market book value
+
+# Or roll a covered-call overlay through a whole price path.
+path = 100 * np.cumprod(1 + np.random.default_rng(0).normal(0.0005, 0.01, 252))
+res = simulate_covered_call_roll(path, moneyness=1.05, tenor=0.25,
+                                 roll_every=21, vol=0.2)
+res.total_return, res.stock_return, res.total_costs, res.n_rolls
+```
+
+`simulate_covered_call_roll` holds the underlying, writes a short call per share,
+and rolls it every `roll_every` steps — charging costs at each roll and returning
+the overlaid equity path alongside the buy-and-hold benchmark.

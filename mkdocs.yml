@@ -141,3 +141,6 @@ nav:
       - Data &amp; moments: reference/data.md
       - Visualization: reference/viz.md
       - Types &amp; registry: reference/types.md
+  - Project:
+      - API stability: reference/stability.md
+      - Numerical validation: reference/validation.md

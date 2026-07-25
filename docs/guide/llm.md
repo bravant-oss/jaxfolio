@@ -1,5 +1,13 @@
 # LLM strategies
 
+!!! warning "Experimental — not investment advice"
+    These strategies are **experimental research prototypes**. LLM outputs are
+    non-deterministic and can be confidently wrong; the resulting allocations are
+    **not** investment advice or investment-quality signals, and the API may
+    change without notice. Each strategy emits an `ExperimentalWarning` on first
+    use. See the [disclaimer](https://github.com/bravant-oss/jaxfolio/blob/main/DISCLAIMER.md)
+    and the [stability policy](../reference/stability.md#experimental-features).
+
 jaxfolio ships three LLM-driven allocation strategies that run entirely on a
 **local** model via [Ollama](https://ollama.com) — no API keys, and no data
 leaves your machine. Each elicits per-asset **views** from the model and routes

@@ -1,5 +1,13 @@
 """LLM-driven portfolio strategies (local models).
 
+.. warning::
+
+   **Experimental.** These strategies are research prototypes. LLM outputs are
+   non-deterministic and can be confidently wrong; the resulting allocations are
+   **not** investment advice or investment-quality signals. The API may change
+   without notice, and each strategy emits an :class:`ExperimentalWarning` on
+   first use. See jaxfolio's ``DISCLAIMER.md``.
+
 Three strategies, all with the standard ``method(returns, ...) -> PortfolioResult``
 shape so they drop into the backtester and plots like any built-in. Each elicits
 per-asset **views** from a local LLM and routes them through the existing
@@ -14,6 +22,7 @@ non-returns arguments with :func:`functools.partial`.
 
 from __future__ import annotations
 
+from jaxfolio.llm._experimental import warn_experimental
 from jaxfolio.llm.agents import DEFAULT_ROLES, debate
 from jaxfolio.llm.client import LLMClient, default_client
 from jaxfolio.llm.sentiment import llm_sentiment, sentiment_to_views
@@ -41,7 +50,13 @@ def llm_black_litterman(
     Samples the local LLM ``samples`` times for per-asset return views, calibrates
     the view confidence from the sampling dispersion, and feeds both into
     Black-Litterman. Metadata records the raw views and confidence.
+
+    .. warning::
+
+       Experimental research feature — outputs are not investment advice. Emits an
+       :class:`~jaxfolio.llm.ExperimentalWarning` on first use.
     """
+    warn_experimental("llm_black_litterman")
     client = _resolve_client(client)
     viewset = llm_views(returns, client, samples=samples, extra_context=extra_context)
     result = black_litterman(
@@ -80,7 +95,13 @@ def llm_sentiment_portfolio(
     The LLM scores per-asset sentiment from ``news`` (``{asset: text | [headlines]}``),
     which is converted to return-view tilts and combined with the market
     equilibrium through Black-Litterman.
+
+    .. warning::
+
+       Experimental research feature — outputs are not investment advice. Emits an
+       :class:`~jaxfolio.llm.ExperimentalWarning` on first use.
     """
+    warn_experimental("llm_sentiment_portfolio")
     client = _resolve_client(client)
     scores = llm_sentiment(news, client)
     views = sentiment_to_views(scores, strength=strength)
@@ -112,7 +133,13 @@ def llm_agent_portfolio(
     Role-specialized LLM agents each argue per-asset views; the moderator
     aggregates them (with agreement-based confidence) and Black-Litterman turns
     the consensus into weights.
+
+    .. warning::
+
+       Experimental research feature — outputs are not investment advice. Emits an
+       :class:`~jaxfolio.llm.ExperimentalWarning` on first use.
     """
+    warn_experimental("llm_agent_portfolio")
     client = _resolve_client(client)
     result_debate = debate(returns, client, roles=roles, news=news)
     result = black_litterman(

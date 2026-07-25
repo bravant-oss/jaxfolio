@@ -96,7 +96,37 @@ def _trivial_single_asset(names, mat_np, method):
 
 
 def hierarchical_risk_parity(returns, *, linkage_method: str = "single") -> PortfolioResult:
-    """Hierarchical Risk Parity (López de Prado, 2016)."""
+    """Hierarchical Risk Parity (López de Prado, 2016).
+
+    A three-stage allocator that avoids inverting the (often ill-conditioned)
+    covariance matrix. First, assets are clustered by the correlation distance
+    ``sqrt(0.5 * (1 - rho))`` into a dendrogram (**tree clustering**). Second, the
+    covariance matrix is **quasi-diagonalized** by reordering rows/columns to the
+    dendrogram's leaf order, placing similar assets adjacent. Third, capital is
+    assigned by **recursive bisection**: each cluster is split in two and capital
+    is allocated between the halves in inverse proportion to their inverse-
+    variance sub-portfolio variance. The result is a long-only, fully-invested
+    portfolio that is more robust out-of-sample than a direct minimum-variance
+    solve. Validated against PyPortfolioOpt's HRP (see the
+    [validation matrix](validation.md)).
+
+    Parameters
+    ----------
+    returns:
+        Asset return panel (``PortfolioResult``-compatible input, e.g. a
+        DataFrame of periodic returns).
+    linkage_method:
+        SciPy hierarchical-clustering linkage method used to build the
+        dendrogram. ``"single"`` (the default) matches López de Prado's original
+        formulation; ``"average"``, ``"complete"``, or ``"ward"`` are also valid.
+
+    Returns
+    -------
+    PortfolioResult
+        Weights plus metadata: the ``linkage`` matrix, the quasi-diagonal leaf
+        ``order``, and the ``ordered_assets`` names. A single-asset panel returns
+        the trivial ``[1.0]`` allocation.
+    """
     mat, names = as_matrix(returns)
     mat_np = np.asarray(mat)
     if len(names) == 1:

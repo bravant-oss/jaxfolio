@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question / usage help
+    url: https://github.com/bravant-oss/jaxfolio/discussions
+    about: Ask "how do I…" questions and share ideas in Discussions.
+  - name: Security vulnerability
+    url: https://github.com/bravant-oss/jaxfolio/security/advisories/new
+    about: Report security issues privately — please do not open a public issue.

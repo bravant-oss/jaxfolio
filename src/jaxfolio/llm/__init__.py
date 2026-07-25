@@ -1,5 +1,12 @@
 """Local-LLM portfolio strategies.
 
+.. warning::
+
+   **Experimental.** The LLM strategies in this package are research prototypes.
+   Their outputs are non-deterministic and are **not** investment advice or
+   investment-quality signals; their API may change without notice. Each strategy
+   emits an :class:`ExperimentalWarning` on first use. See ``DISCLAIMER.md``.
+
 All strategies run against a **local** model (Ollama by default) and never call a
 cloud API. Import the strategies directly, or pass a :class:`FakeLLM` for offline
 use:
@@ -8,6 +15,7 @@ use:
 >>> result = llm_black_litterman(returns, client=OllamaClient("llama3.1"))
 """
 
+from jaxfolio.llm._experimental import ExperimentalWarning
 from jaxfolio.llm.agents import DebateResult, debate
 from jaxfolio.llm.client import (
     FakeLLM,
@@ -25,6 +33,8 @@ from jaxfolio.llm.strategies import (
 from jaxfolio.llm.views import ViewSet, llm_views
 
 __all__ = [
+    # experimental marker
+    "ExperimentalWarning",
     # clients
     "LLMClient",
     "OllamaClient",

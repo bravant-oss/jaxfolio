@@ -76,9 +76,10 @@ def test_min_cvar_default_matches_explicit_adam(returns):
     """The default config must still resolve to Adam, bit for bit.
 
     The packed ``(w, tau)`` variable suits Adam rather than a scalar BB step, so
-    ``min_cvar`` substitutes Adam when the config says ``"spg"``. Generalizing the
-    solver must not shift that default path — the known CVaR optimality gap is a
-    documented, separately tracked limitation.
+    ``min_cvar`` substitutes Adam when the config says ``"spg"``. The known CVaR
+    optimality gap is pinned by a *strict* xfail in
+    ``tests/validation/test_reference_solvers.py::test_min_cvar_matches_cvxpy_lp``,
+    so generalizing the solver must not shift this default path.
     """
     default = C.min_cvar(returns, alpha=0.95)
     explicit = C.min_cvar(returns, alpha=0.95, config=OptimizerConfig(solver="adam"))

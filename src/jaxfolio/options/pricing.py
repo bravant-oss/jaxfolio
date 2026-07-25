@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax.scipy.stats import norm
 
 Array = jnp.ndarray
@@ -140,12 +141,30 @@ def binomial_american(
     is_call: bool = True,
     *,
     steps: int = 256,
+    dividends: list[tuple[float, float]] | None = None,
 ) -> Array:
     """Cox-Ross-Rubinstein binomial price for an American-style option.
 
     Backward induction with early-exercise checks at every node. ``steps``
     controls the lattice resolution.
+
+    Parameters
+    ----------
+    div:
+        Continuous dividend *yield* (always supported).
+    dividends:
+        Optional schedule of **discrete cash dividends** as ``(time, amount)``
+        pairs (time in years from now, ``0 < time <= ttm``). Priced with the
+        escrowed-dividend model: the lattice is built on the spot net of the
+        present value of dividends paid before expiry, and the present value of
+        not-yet-paid dividends is added back at each node for the early-exercise
+        decision. Composes with the continuous ``div`` yield. When ``None`` (the
+        default) the fast pure-JAX lattice is used and behavior is unchanged.
     """
+    if dividends:
+        return _binomial_american_discrete_div(
+            spot, strike, ttm, vol, rate, div, is_call, steps, dividends
+        )
     dt = ttm / steps
     u = jnp.exp(vol * jnp.sqrt(dt))
     d = 1.0 / u
@@ -171,3 +190,52 @@ def binomial_american(
 
     values = jax.lax.fori_loop(1, steps + 1, body, values)
     return values[0]
+
+
+def _binomial_american_discrete_div(
+    spot: float,
+    strike: float,
+    ttm: float,
+    vol: float,
+    rate: float,
+    div: float,
+    is_call: bool,
+    steps: int,
+    dividends: list[tuple[float, float]],
+) -> Array:
+    """CRR American price with discrete cash dividends (escrowed-dividend model).
+
+    Uses NumPy: the recombining lattice is built on the dividend-adjusted spot,
+    and future (not-yet-paid) dividend PV is added back at each layer so the
+    early-exercise test sees the true underlying price.
+    """
+    dt = ttm / steps
+    u = float(np.exp(vol * np.sqrt(dt)))
+    d = 1.0 / u
+    disc = float(np.exp(-rate * dt))
+    p = (np.exp((rate - div) * dt) - d) / (u - d)
+    p = float(np.clip(p, 0.0, 1.0))
+    sign = 1.0 if is_call else -1.0
+
+    divs = [(float(t), float(a)) for t, a in dividends if 0.0 < t <= ttm]
+    pv0 = sum(a * np.exp(-rate * t) for t, a in divs)
+    s_adj = spot - pv0  # lattice is built on the dividend-stripped spot
+
+    def escrow(tm: float) -> float:
+        # PV at time tm of dividends still to be paid strictly after tm.
+        return sum(a * np.exp(-rate * (t - tm)) for t, a in divs if t > tm + 1e-12)
+
+    j = np.arange(steps + 1)
+    terminal = s_adj * u**j * d ** (steps - j)  # escrow at expiry is zero
+    values = np.maximum(sign * (terminal - strike), 0.0)
+
+    for i in range(1, steps + 1):
+        m = steps - i
+        tm = m * dt
+        node_prices = s_adj * u**j * d ** (m - j) + escrow(tm)
+        up = np.roll(values, -1)
+        cont = disc * (p * up + (1.0 - p) * values)
+        exercise = np.maximum(sign * (node_prices - strike), 0.0)
+        values = np.maximum(cont, exercise)
+
+    return jnp.asarray(values[0])
