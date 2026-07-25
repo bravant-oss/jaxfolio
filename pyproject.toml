@@ -46,13 +46,16 @@ llm = ["requests>=2.31"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
-    "ruff>=0.5.0",
+    # Upper bound on purpose: the formatter is a CI gate, and a new minor can
+    # reformat code it previously left alone (0.16 did, for Markdown fences).
+    # `uv.lock` is not committed, so CI resolves this range fresh on every run.
+    "ruff>=0.15,<0.17",
 ]
 docs = [
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.25",
     "pymdown-extensions>=10.0",
-    "ruff>=0.5.0",
+    "ruff>=0.15,<0.17",
 ]
 
 [project.urls]
@@ -74,6 +77,10 @@ packages = ["src/jaxfolio"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
+# ruff 0.16 began formatting Python inside Markdown code fences. Our docs align
+# code samples into columns on purpose (they read as tables), so let the prose
+# own its own formatting — Python files are still fully checked and formatted.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "NPY"]
