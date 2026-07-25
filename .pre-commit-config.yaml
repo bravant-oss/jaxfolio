@@ -1,8 +1,11 @@
 # Run with: uv run pre-commit run --all-files
 # Install the git hook once with: uv run pre-commit install
 repos:
+  # Keep this rev inside the `ruff>=0.15,<0.17` range in pyproject.toml, so the
+  # hook and the CI lint job agree. On v0.6.9 they did not: the hook wanted to
+  # reformat a file CI considered clean.
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
+    rev: v0.16.0
     hooks:
       - id: ruff
         args: [--fix]
@@ -12,7 +15,11 @@ repos:
     hooks:
       - id: end-of-file-fixer
       - id: trailing-whitespace
+      # --unsafe: still validates YAML syntax, but does not try to *construct*
+      # tagged objects. mkdocs.yml uses `!!python/name:` tags for the
+      # mkdocs-material emoji extension, which the plain loader cannot resolve.
       - id: check-yaml
+        args: [--unsafe]
       - id: check-toml
       - id: check-merge-conflict
       - id: check-added-large-files
