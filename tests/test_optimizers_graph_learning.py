@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from jaxfolio.optimizers import graph as G
 from jaxfolio.optimizers import learning as L
@@ -36,6 +37,26 @@ def test_deep_sharpe_trains_and_allocates(small_returns):
     assert np.isclose(res.weights.sum(), 1.0, atol=1e-4)
     assert (res.weights >= 0).all()
     assert res.metadata["epochs"] == 40
+    assert res.metadata["optimizer"] == "adam"
+
+
+def test_deep_sharpe_accepts_any_optax_optimizer(small_returns):
+    res = L.deep_sharpe(
+        small_returns,
+        lookback=30,
+        epochs=5,
+        hidden=(16,),
+        optimizer="adamw",
+        optimizer_options={"weight_decay": 1e-4},
+    )
+    assert np.isclose(res.weights.sum(), 1.0, atol=1e-4)
+    assert res.metadata["optimizer"] == "adamw"
+
+
+def test_deep_sharpe_rejects_spg(small_returns):
+    """'spg' projects a weight vector; it cannot train an MLP pytree."""
+    with pytest.raises(ValueError, match="optax optimizer"):
+        L.deep_sharpe(small_returns, lookback=30, epochs=2, hidden=(16,), optimizer="spg")
 
 
 def test_online_gradient_valid(returns):

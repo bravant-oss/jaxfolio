@@ -55,6 +55,46 @@ jf.inverse_volatility(returns)
 These minimize a differentiable objective under the configured constraints with
 the shared solver. Each accepts an optional `config: OptimizerConfig`.
 
+### Choosing a solver
+
+`config.solver` selects how that objective gets minimized. Three spellings work:
+
+```python
+import optax
+from jaxfolio import OptimizerConfig
+
+OptimizerConfig(solver="spg")            # default: spectral projected gradient
+OptimizerConfig(solver="adamw")          # any optax optimizer, by name
+OptimizerConfig(solver=optax.adamw)      # …or by factory
+
+OptimizerConfig(solver="sgd", solver_options={"momentum": 0.9, "nesterov": True})
+```
+
+Names resolve against `optax` and then `optax.contrib`, so everything the
+installed optax ships is reachable. `jf.available_solvers()` lists them.
+
+| | `"spg"` (default) | any optax optimizer |
+|---|---|---|
+| Step size | adapts per iteration (Barzilai–Borwein) | fixed; `learning_rate` defaults to `1e-2` |
+| `tol` measures | projected-gradient (KKT) norm — zero at the optimum | weight-update norm — a proxy only |
+| Best for | the exact constrained optimum | differentiating *through* the optimizer |
+
+Two caveats worth knowing:
+
+- **Line-search optimizers are not supported.** `optax.lbfgs` and
+  `optax.polyak_sgd` need `value`/`grad`/`value_fn` on every step, which the
+  projected loop does not supply; they raise a clear error rather than failing
+  cryptically. Use `"spg"`, which adapts its own step size.
+- **Pass the factory, not a built transformation.** `solver=optax.adamw` is
+  cached; `solver=optax.adamw(1e-3)` is a fresh object on every call and would
+  recompile the solver kernel each solve, so it is rejected. For an
+  `optax.chain(...)` composition, wrap it in a module-level function
+  `def my_solver(learning_rate): ...` and pass that.
+
+`min_cvar` is the one exception to the default: its packed `(w, tau)` variable
+suits Adam rather than a scalar BB step, so it substitutes Adam when the config
+says `"spg"`. An explicitly chosen optax optimizer is honored.
+
 ### `minimum_variance`
 
 The global minimum-variance portfolio:
@@ -224,6 +264,13 @@ $$
 ```python
 result = jf.deep_sharpe(returns, lookback=60, hidden=(64, 32), epochs=300, seed=0)
 result.metadata["final_train_sharpe"], result.metadata["params"]
+```
+
+Training uses Adam by default; `optimizer` takes any optax name or factory and
+`optimizer_options` its hyperparameters:
+
+```python
+jf.deep_sharpe(returns, optimizer="adamw", optimizer_options={"weight_decay": 1e-4})
 ```
 
 ### `online_gradient`

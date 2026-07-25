@@ -16,6 +16,7 @@ from jaxfolio.registry import (
     strategy_info,
     unregister,
 )
+from jaxfolio.types import OptimizerConfig
 
 
 def test_builtins_registered():
@@ -99,6 +100,22 @@ def test_custom_from_objective_uses_context_n(returns):
 
     CustomStrategy.from_objective("cap", obj)(returns)
     assert seen["n"] == len(returns.columns)
+
+
+def test_custom_from_objective_honors_solver(returns):
+    """``config.solver`` must reach the solver (it used to be silently dropped)."""
+
+    def obj(w, ctx):
+        return w @ ctx.cov @ w
+
+    strat = CustomStrategy.from_objective("minvar", obj)
+    default = strat(returns).weights
+    sgd = CustomStrategy.from_objective(
+        "minvar",
+        obj,
+        config=OptimizerConfig(solver="sgd", learning_rate=1e-3, max_iter=5),
+    )(returns).weights
+    assert not np.allclose(default, sgd, atol=1e-6)
 
 
 def test_custom_weight_length_mismatch_raises(returns):

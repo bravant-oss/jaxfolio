@@ -6,7 +6,7 @@ gradient step on an unconstrained ``objective(w)``, then project ``w`` back onto
 the feasible set. The loop runs inside ``jax.lax.while_loop`` so the whole solve
 is a single jit-compiled kernel.
 
-Two solvers are available:
+Two families of solver are available:
 
 * ``"spg"`` (default) — spectral projected gradient with Barzilai-Borwein step
   sizes. It needs no learning-rate tuning: the step adapts to the local
@@ -14,28 +14,43 @@ Two solvers are available:
   (matching a dedicated QP solver) in far fewer iterations than a fixed-step
   method. Convergence is measured by the projected-gradient (KKT stationarity)
   norm ``||w - P(w - ∇f)||``.
-* ``"adam"`` — the classic fixed-step optax-Adam projected-gradient loop. Its
-  smooth dynamics are preferable when differentiating *through* the optimizer to
-  train an allocation policy, and it handles the non-smooth CVaR objective (with
-  its free auxiliary variable) more gracefully than a single scalar BB step.
+* **any optax optimizer** — by name (``"adam"``, ``"adamw"``, ``"sgd"``,
+  ``"rmsprop"``, ...), by factory (``optax.adamw``), with hyperparameters passed
+  as ``solver_options={"weight_decay": 1e-3}``. See :mod:`jaxfolio.solvers`.
+  These run a fixed-step projected loop whose smooth dynamics are preferable
+  when differentiating *through* the optimizer to train an allocation policy,
+  and which handle the non-smooth CVaR objective (with its free auxiliary
+  variable) more gracefully than a single scalar BB step. Convergence is
+  measured by the weight-update norm ``||w_{k+1} - w_k||`` — a proxy for
+  optimality rather than a KKT test, so optimizers whose step does not shrink
+  near the optimum (``sign_sgd``, ``lion``, plain ``sgd``) may run to
+  ``max_iter`` or stall early when the budget projection cancels a uniform step.
 
 Performance note: :func:`solve_constrained` is jit-cached on the *identity* of
 the objective/projection functions, so calling a built-in optimizer repeatedly
 (e.g. at every backtest rebalance) compiles once and reuses the kernel. The
 public :func:`solve_projected_gradient` accepts an arbitrary Python closure and
 therefore re-traces per call — fine for one-off custom strategies.
+
+The solver is part of that cache key, which is why it travels as a
+:class:`~jaxfolio.solvers.SolverSpec` (a hashable, equality-stable tuple) rather
+than as a live ``optax.GradientTransformation``: names and module-level factories
+hash identically across calls, a freshly built transformation does not. Changing
+a ``solver_options`` value costs exactly one recompile.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from functools import partial
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 import optax
 
 from jaxfolio.constraints.projections import project_box_budget, project_simplex
+from jaxfolio.solvers import SolverSpec, build_optimizer, resolve_solver
 
 Array = jnp.ndarray
 Objective = Callable[[Array], Array]
@@ -166,16 +181,15 @@ def _spg_loop(
     return w, i, pg
 
 
-def _adam_loop(
+def _optax_loop(
     f: Objective,
     projection: Callable[[Array], Array],
     w0: Array,
-    learning_rate: float,
+    optimizer: optax.GradientTransformation,
     tol: Array,
     max_iter: int,
 ) -> tuple[Array, Array, Array]:
-    """Fixed-step projected Adam. Returns ``(w, iters, final_step)``."""
-    optimizer = optax.adam(learning_rate)
+    """Fixed-step projected optax loop. Returns ``(w, iters, final_step)``."""
     grad_fn = jax.grad(f)
 
     w0 = projection(w0)
@@ -203,18 +217,16 @@ def _run_solver(
     projection: Callable[[Array], Array],
     w0: Array,
     *,
-    solver: str,
+    solver: str | Callable[..., Any] | SolverSpec,
     learning_rate: float | None,
     max_iter: int,
     tol,
+    solver_options: Mapping[str, Any] | None = None,
 ) -> tuple[Array, Array]:
     """Dispatch to the requested solver. Returns ``(weights, iterations)``."""
     tol = jnp.asarray(tol)
-    if solver == "adam":
-        lr = 1e-2 if learning_rate is None else learning_rate
-        w, iters, _ = _adam_loop(f, projection, w0, lr, tol, max_iter)
-        return w, iters
-    if solver == "spg":
+    spec = resolve_solver(solver, solver_options)  # idempotent on a SolverSpec
+    if spec.kind == "spg":
         if learning_rate is not None:
             alpha0 = jnp.asarray(learning_rate, dtype=w0.dtype)
         else:
@@ -222,12 +234,17 @@ def _run_solver(
             alpha0 = jnp.clip(1.0 / (lipschitz + 1e-12), 1e-8, 1e6)
         w, iters, _ = _spg_loop(f, projection, w0, alpha0, tol, max_iter)
         return w, iters
-    raise ValueError(f"unknown solver {solver!r}; expected 'spg' or 'adam'")
+    optimizer = build_optimizer(spec, learning_rate)
+    w, iters, _ = _optax_loop(f, projection, w0, optimizer, tol, max_iter)
+    return w, iters
 
 
 # --------------------------------------------------------------------------- #
 # Cached kernel (built-ins) and public closure API (custom strategies)
 # --------------------------------------------------------------------------- #
+_SPG = resolve_solver("spg")  # module-level singleton → one stable default cache key
+
+
 @partial(
     jax.jit,
     static_argnames=("objective", "projection", "solver", "learning_rate", "max_iter"),
@@ -240,7 +257,7 @@ def _solve_cached(
     w0,
     tol,
     *,
-    solver: str = "spg",
+    solver: SolverSpec = _SPG,
     learning_rate: float | None = None,
     max_iter: int = 2000,
 ):
@@ -251,6 +268,10 @@ def _solve_cached(
     ``proj_params`` / ``w0`` / ``tol`` are traced. The cache therefore keys on
     (objective kind, projection kind, solver, learning_rate, n-assets shape) —
     so repeated calls on same-shaped data reuse the compiled kernel.
+
+    ``solver`` must already be a :class:`~jaxfolio.solvers.SolverSpec`: the public
+    wrappers resolve it before crossing the jit boundary so the static key is
+    always hashable and equality-stable.
     """
     f = lambda w: objective(w, obj_params)  # noqa: E731
     proj = lambda w: projection(w, proj_params)  # noqa: E731
@@ -266,15 +287,18 @@ def solve_constrained(
     projection,
     proj_params,
     *,
-    solver: str = "spg",
+    solver: str | Callable[..., Any] | SolverSpec = "spg",
     learning_rate: float | None = None,
     max_iter: int = 2000,
     tol: float = 1e-7,
+    solver_options: Mapping[str, Any] | None = None,
 ) -> tuple[Array, dict[str, Array]]:
     """Cached entry point for the built-in optimizers.
 
     ``objective`` and ``projection`` must be *module-level* functions (see
     :mod:`jaxfolio.optimizers.classical`) so the underlying jit cache hits.
+    ``solver`` is ``"spg"``, any optax optimizer name or factory, or a
+    pre-resolved :class:`~jaxfolio.solvers.SolverSpec`.
     Returns ``(weights, info)`` with ``info["iterations"]``.
     """
     w, iters = _solve_cached(
@@ -284,7 +308,7 @@ def solve_constrained(
         proj_params,
         w0,
         jnp.asarray(tol),
-        solver=solver,
+        solver=resolve_solver(solver, solver_options),
         learning_rate=learning_rate,
         max_iter=max_iter,
     )
@@ -299,7 +323,8 @@ def solve_projected_gradient(
     learning_rate: float | None = None,
     max_iter: int = 2000,
     tol: float = 1e-7,
-    solver: str = "spg",
+    solver: str | Callable[..., Any] | SolverSpec = "spg",
+    solver_options: Mapping[str, Any] | None = None,
 ) -> tuple[Array, dict[str, Array]]:
     """Minimize ``objective`` over the feasible set defined by ``projection``.
 
@@ -307,7 +332,9 @@ def solve_projected_gradient(
     ``projection(w) -> w`` (the shape used by custom strategies and the
     ``toolkit``). Because the closure identity changes per call this re-traces
     each time — for hot loops over a built-in optimizer, prefer the cached
-    :func:`solve_constrained`. Returns ``(weights, info)``.
+    :func:`solve_constrained`. ``solver`` is ``"spg"``, any optax optimizer name
+    or factory, or a pre-resolved :class:`~jaxfolio.solvers.SolverSpec`.
+    Returns ``(weights, info)``.
     """
     w, iters = _run_solver(
         objective,
@@ -317,6 +344,7 @@ def solve_projected_gradient(
         learning_rate=learning_rate,
         max_iter=max_iter,
         tol=tol,
+        solver_options=solver_options,
     )
     return w, {"iterations": iters}
 

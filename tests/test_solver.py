@@ -1,15 +1,20 @@
-"""Tests for the projected-gradient solver: convergence and jit-caching.
+"""Tests for the projected-gradient solver: convergence, optax solvers, caching.
 
 The convergence tests pin the constrained optimizers to an independent SciPy
 SLSQP reference on the *same* moments — this is the exact gap the benchmark
 against other libraries surfaced (the old Adam solver stalled short of the
-minimum-variance optimum). The cache test guards the performance fix: repeated
-calls on same-shaped data must reuse the compiled kernel rather than re-tracing.
+minimum-variance optimum). The solver-selection tests cover the optax spellings
+(name, factory, ``solver_options``) and the errors they must raise. The cache
+tests guard the performance fix: repeated calls on same-shaped data must reuse
+the compiled kernel rather than re-tracing — which is why a solver key has to be
+hashable *and* equality-stable across separately constructed configs.
 """
 
 from __future__ import annotations
 
 import numpy as np
+import optax
+import pytest
 import scipy.optimize as opt
 
 from jaxfolio.data.synthetic import generate_returns
@@ -87,6 +92,50 @@ def test_adam_solver_still_produces_valid_portfolio(returns):
     assert (w >= -1e-4).all()
 
 
+@pytest.mark.parametrize("name", ["adamw", "sgd", "rmsprop", "lion", "yogi"])
+def test_optax_solver_names_produce_valid_portfolios(returns, name):
+    """Any optax optimizer must still land on the feasible set."""
+    w = C.maximum_sharpe(returns, config=OptimizerConfig(solver=name)).weights
+    assert np.isclose(w.sum(), 1.0, atol=1e-4)
+    assert (w >= -1e-4).all()
+
+
+def test_string_and_callable_solver_agree(returns):
+    """``solver="adamw"`` and ``solver=optax.adamw`` resolve to the same run."""
+    by_name = C.minimum_variance(returns, config=OptimizerConfig(solver="adamw")).weights
+    by_factory = C.minimum_variance(returns, config=OptimizerConfig(solver=optax.adamw)).weights
+    assert np.array_equal(by_name, by_factory)
+
+
+def test_solver_options_reach_optax(returns):
+    """Hyperparameters in ``solver_options`` actually change the trajectory."""
+    plain = OptimizerConfig(solver="sgd", learning_rate=1e-2, max_iter=25)
+    momentum = OptimizerConfig(
+        solver="sgd", learning_rate=1e-2, max_iter=25, solver_options={"momentum": 0.9}
+    )
+    w_plain = C.minimum_variance(returns, config=plain).weights
+    w_momentum = C.minimum_variance(returns, config=momentum).weights
+    assert not np.allclose(w_plain, w_momentum, atol=1e-6)
+
+
+def test_line_search_solver_rejected(returns):
+    """optax.lbfgs needs per-step extra args the loop can't supply — say so."""
+    cfg = OptimizerConfig(solver="lbfgs")
+    with pytest.raises(ValueError, match="line-search"):
+        C.minimum_variance(returns, config=cfg)
+
+
+def test_prebuilt_transformation_rejected():
+    """A pre-built transformation would defeat the jit cache; point at the factory."""
+    with pytest.raises(TypeError, match="factory"):
+        OptimizerConfig(solver=optax.adam(1e-2))
+
+
+def test_spg_rejects_solver_options():
+    with pytest.raises(ValueError, match="optax solvers only"):
+        OptimizerConfig(solver="spg", solver_options={"b1": 0.9})
+
+
 def test_jit_cache_reuses_compilation():
     """Same-shaped repeated solves reuse the compiled kernel (the speed fix)."""
     # A panel shape not used elsewhere in the suite, so the cache entry is ours.
@@ -110,3 +159,26 @@ def test_jit_cache_separates_shapes():
     C.minimum_variance(p8)  # both already compiled -> no growth
     C.minimum_variance(p9)
     assert _solve_cached._cache_size() == before
+
+
+def test_jit_cache_stable_across_optax_configs():
+    """Two independently built optax configs must share one cache entry.
+
+    The solver travels as a jit *static* argument, so an unstable key (a fresh
+    ``GradientTransformation``, an inline ``partial``) would recompile on every
+    solve. This is the regression guard for that.
+    """
+    panel = generate_returns(n_assets=11, n_days=300, seed=123)
+    before = _solve_cached._cache_size()
+    C.minimum_variance(
+        panel,
+        config=OptimizerConfig(solver="adamw", solver_options={"weight_decay": 1e-3}),
+    )
+    after_first = _solve_cached._cache_size()
+    C.minimum_variance(
+        panel,  # a *separately constructed* but equal config
+        config=OptimizerConfig(solver="adamw", solver_options={"weight_decay": 1e-3}),
+    )
+    after_second = _solve_cached._cache_size()
+    assert after_first == before + 1, "first optax solve should compile exactly one variant"
+    assert after_second == after_first, "an equal config must reuse the compiled kernel"

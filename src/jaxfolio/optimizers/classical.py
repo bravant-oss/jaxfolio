@@ -27,6 +27,7 @@ from jaxfolio.optimizers.base import (
     solve_constrained,
 )
 from jaxfolio.results import finalize_result, moments
+from jaxfolio.solvers import resolve_solver
 from jaxfolio.types import OptimizerConfig, PortfolioResult
 
 Array = jnp.ndarray
@@ -94,7 +95,7 @@ def _moments(returns, cov_estimator=None):
 def _solver_kwargs(config: OptimizerConfig) -> dict:
     """Common solver settings pulled from an OptimizerConfig."""
     return {
-        "solver": config.solver,
+        "solver": config.solver_spec(),
         "learning_rate": config.learning_rate,
         "max_iter": config.max_iter,
         "tol": config.tol,
@@ -370,7 +371,8 @@ def min_cvar(
 
     The packed ``(w, tau)`` variable (``tau`` unconstrained) and the piecewise
     objective are ill-suited to a single scalar Barzilai-Borwein step, so this
-    optimizer uses the Adam solver regardless of ``config.solver``.
+    optimizer substitutes Adam whenever ``config.solver`` is ``"spg"``. An
+    explicitly chosen optax optimizer is honored.
     """
     config = config or OptimizerConfig()
     mu, cov, names, mat = _moments(returns)
@@ -383,15 +385,17 @@ def min_cvar(
 
     # Pack (w, tau) into a single vector; tau starts at 0.
     z0 = jnp.concatenate([jnp.full(n, 1.0 / n), jnp.zeros(1)])
-    lr = 1e-2 if config.learning_rate is None else config.learning_rate
+    spec = config.solver_spec()
+    if spec.kind == "spg":
+        spec = resolve_solver("adam")
     z, info = solve_constrained(
         _cvar_objective,
         params,
         z0,
         projection,
         pparams,
-        solver="adam",
-        learning_rate=lr,
+        solver=spec,
+        learning_rate=config.learning_rate,
         max_iter=config.max_iter,
         tol=config.tol,
     )

@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 This file is generated with [git-cliff](https://git-cliff.org) from
 [Conventional Commits](https://www.conventionalcommits.org) and curated for clarity.
 
+## [Unreleased]
+
+### Features
+
+- **`OptimizerConfig.solver` now accepts any optax optimizer**, not just
+  `"spg"` / `"adam"` — by name (`solver="adamw"`, `"sgd"`, `"rmsprop"`, ...,
+  resolved against `optax` and `optax.contrib`) or by factory
+  (`solver=optax.adamw`). Hyperparameters go in the new `solver_options`
+  (`{"weight_decay": 1e-3}`). The solver travels as a hashable
+  `jaxfolio.solvers.SolverSpec`, so the jit cache still hits across repeated
+  solves; pre-built transformations (`optax.adam(1e-2)`) are rejected with a
+  pointer to the factory spelling, because they would recompile every solve.
+- Added `jaxfolio.solvers` (`resolve_solver`, `build_optimizer`,
+  `available_solvers`, `SolverSpec`), re-exported from `jaxfolio.toolkit`;
+  `jf.available_solvers()` lists the selectable names.
+- `deep_sharpe` gained `optimizer` / `optimizer_options`, so the MLP allocation
+  policy can be trained with any optax optimizer instead of only Adam.
+- `OptimizerConfig` now validates `solver` / `solver_options` at construction,
+  with close-match suggestions for typos, and rejects line-search optimizers
+  (`optax.lbfgs`, `optax.polyak_sgd`) with an actionable message — they need
+  per-step `value`/`grad`/`value_fn` the projected-gradient loop cannot supply.
+
+### Fixed
+
+- `CustomStrategy.from_objective` now forwards `config.solver` /
+  `config.solver_options` to the solver. It previously dropped them, so a
+  strategy configured with `solver="adam"` silently ran SPG — and the supplied
+  `learning_rate` was reinterpreted as SPG's initial Barzilai-Borwein step.
+
 ## [0.1.1] - 2026-07-21
 
 ### Performance
