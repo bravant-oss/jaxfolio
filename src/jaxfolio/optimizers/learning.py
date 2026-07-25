@@ -15,6 +15,9 @@ additionally stores the trained parameters so it can be rolled forward.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
+from typing import Any
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -22,6 +25,7 @@ import optax
 
 from jaxfolio.moments.estimators import as_matrix, mean_returns, sample_covariance
 from jaxfolio.optimizers.base import portfolio_return, portfolio_volatility
+from jaxfolio.solvers import build_optimizer, resolve_solver
 from jaxfolio.types import PortfolioResult
 
 Array = jnp.ndarray
@@ -57,6 +61,8 @@ def deep_sharpe(
     hidden: tuple[int, ...] = (64, 32),
     epochs: int = 300,
     learning_rate: float = 1e-3,
+    optimizer: str | Callable[..., Any] = "adam",
+    optimizer_options: Mapping[str, Any] | None = None,
     seed: int = 0,
 ) -> PortfolioResult:
     """Train a differentiable MLP allocation policy to maximize in-sample Sharpe.
@@ -74,7 +80,22 @@ def deep_sharpe(
         Hidden layer widths of the MLP.
     epochs:
         Number of full-batch gradient ascent steps.
+    optimizer:
+        Which optax optimizer trains the policy — a name (``"adam"`` by default,
+        or ``"adamw"``, ``"sgd"``, ``"lion"``, ...) or a factory callable such as
+        ``optax.adamw``. See :func:`jaxfolio.solvers.available_solvers`.
+    optimizer_options:
+        Extra keyword arguments for the optax factory, e.g.
+        ``{"weight_decay": 1e-4}``.
     """
+    spec = resolve_solver(optimizer, optimizer_options)
+    if spec.kind != "optax":
+        raise ValueError(
+            "deep_sharpe trains an MLP policy, so it needs an optax optimizer "
+            f"(e.g. 'adam', 'adamw', optax.sgd) — {optimizer!r} is not one. The 'spg' "
+            "projected-gradient solver applies to the weight-vector optimizers instead."
+        )
+
     mat, names = as_matrix(returns)
     t, n = mat.shape
     if t <= lookback + 1:
@@ -98,14 +119,14 @@ def deep_sharpe(
         std = jnp.std(r) + 1e-8
         return -(mean / std) * jnp.sqrt(_PPY)
 
-    optimizer = optax.adam(learning_rate)
-    opt_state = optimizer.init(params)
+    tx = build_optimizer(spec, learning_rate)
+    opt_state = tx.init(params)
     loss_fn = jax.jit(jax.value_and_grad(neg_sharpe))
 
     @jax.jit
     def step(params, opt_state):
         loss, grads = loss_fn(params)
-        updates, opt_state = optimizer.update(grads, opt_state, params)
+        updates, opt_state = tx.update(grads, opt_state, params)
         return optax.apply_updates(params, updates), opt_state, loss
 
     history = []
@@ -133,6 +154,7 @@ def deep_sharpe(
             "final_train_sharpe": -history[-1] if history else None,
             "epochs": epochs,
             "lookback": lookback,
+            "optimizer": spec.name,
             "params": params,  # retained so the policy can be rolled forward
         },
     )

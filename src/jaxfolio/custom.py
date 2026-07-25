@@ -133,7 +133,9 @@ class CustomStrategy:
         ``objective_fn(w, ctx)`` must be JAX-differentiable and return a scalar to
         *minimize*; ``ctx`` is a :class:`_Context` exposing ``mu``, ``cov``,
         ``returns``, ``assets``, ``n``. The shared projected-gradient solver and
-        the configured constraint set (long-only / bounds) are reused verbatim.
+        the configured constraint set (long-only / bounds) are reused verbatim,
+        including ``config.solver`` / ``config.solver_options`` — so a custom
+        objective can be minimized with any optax optimizer.
         """
         cfg = config or OptimizerConfig()
 
@@ -145,6 +147,7 @@ class CustomStrategy:
                 lambda w: objective_fn(w, ctx),
                 tk.equal_start(len(names)),
                 projection,
+                solver=cfg.solver_spec(),
                 learning_rate=cfg.learning_rate,
                 max_iter=cfg.max_iter,
                 tol=cfg.tol,

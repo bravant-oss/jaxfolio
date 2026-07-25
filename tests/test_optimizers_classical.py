@@ -72,6 +72,27 @@ def test_min_cvar_reports_cvar(returns):
     assert res.metadata["alpha"] == 0.95
 
 
+def test_min_cvar_default_matches_explicit_adam(returns):
+    """The default config must still resolve to Adam, bit for bit.
+
+    The packed ``(w, tau)`` variable suits Adam rather than a scalar BB step, so
+    ``min_cvar`` substitutes Adam when the config says ``"spg"``. The known CVaR
+    optimality gap is pinned by a *strict* xfail in
+    ``tests/validation/test_reference_solvers.py::test_min_cvar_matches_cvxpy_lp``,
+    so generalizing the solver must not shift this default path.
+    """
+    default = C.min_cvar(returns, alpha=0.95)
+    explicit = C.min_cvar(returns, alpha=0.95, config=OptimizerConfig(solver="adam"))
+    assert default.metadata["cvar"] == explicit.metadata["cvar"]
+    assert np.array_equal(default.weights, explicit.weights)
+
+
+def test_min_cvar_honors_explicit_optax_solver(returns):
+    res = C.min_cvar(returns, alpha=0.95, config=OptimizerConfig(solver="adamw"))
+    assert np.isclose(res.weights.sum(), 1.0, atol=1e-4)
+    assert (res.weights >= -1e-4).all()
+
+
 def test_black_litterman_with_views(returns):
     assets = list(returns.columns)
     views = {assets[0]: 0.001, assets[1]: -0.0005}

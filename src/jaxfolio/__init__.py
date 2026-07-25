@@ -55,6 +55,7 @@ from jaxfolio.registry import (
     strategy_info,
     unregister,
 )
+from jaxfolio.solvers import available_solvers
 from jaxfolio.types import OptimizerConfig, PortfolioResult
 
 # Register the built-in optimizers so they show up in the strategy registry
@@ -68,6 +69,7 @@ __all__ = [
     # types
     "PortfolioResult",
     "OptimizerConfig",
+    "available_solvers",
     # registry & custom strategies
     "register_strategy",
     "get_strategy",

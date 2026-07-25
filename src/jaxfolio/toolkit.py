@@ -48,6 +48,7 @@ from jaxfolio.optimizers.base import (
     solve_projected_gradient,
 )
 from jaxfolio.results import PERIODS_PER_YEAR, equal_start, finalize_result, moments
+from jaxfolio.solvers import SolverSpec, available_solvers, resolve_solver
 from jaxfolio.types import OptimizerConfig, PortfolioResult
 
 Array = jnp.ndarray
@@ -72,6 +73,10 @@ __all__ = [
     "solve_constrained",
     "select_projection",
     "equal_start",
+    # solver selection (any optax optimizer)
+    "available_solvers",
+    "resolve_solver",
+    "SolverSpec",
     # portfolio math
     "portfolio_return",
     "portfolio_variance",

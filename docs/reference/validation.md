@@ -54,8 +54,9 @@ uv run python examples/validation/run_matrix.py   # regenerates the table below
 
 ## Known limitations
 
-- **Minimum CVaR.** The smooth, Adam-based projected-gradient solver used for
-  `min_cvar` converges to a point that is systematically **~26–33% above** the
+- **Minimum CVaR.** The smooth, Adam-based projected-gradient solver `min_cvar`
+  defaults to — an explicitly configured optax optimizer is honored instead —
+  converges to a point that is systematically **~26–33% above** the
   exact CVaR optimum found by the CVXPY LP on multi-asset panels, and additional
   iterations do not close the gap. The direction is correct (it is never *below*
   the true optimum) and single-asset / tiny problems are fine, but the

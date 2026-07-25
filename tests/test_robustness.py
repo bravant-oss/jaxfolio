@@ -73,6 +73,33 @@ def test_config_bounds_resolver():
     assert OptimizerConfig(weight_bounds=(-0.3, 0.8)).bounds() == (-0.3, 0.8)
 
 
+# --- solver configuration -------------------------------------------------- #
+def test_config_rejects_unknown_solver():
+    """A typo must fail at construction, with a suggestion — not deep in the solve."""
+    with pytest.raises(ValueError, match="unknown solver") as exc:
+        OptimizerConfig(solver="adamm")
+    assert "adam" in str(exc.value)
+
+
+def test_config_rejects_unhashable_solver_options():
+    with pytest.raises(TypeError, match="hashable"):
+        OptimizerConfig(solver="adamw", solver_options={"b1": [0.9]})
+
+
+def test_config_rejects_learning_rate_in_solver_options():
+    with pytest.raises(ValueError, match="learning_rate"):
+        OptimizerConfig(solver="adamw", solver_options={"learning_rate": 1e-3})
+
+
+def test_config_stays_hashable():
+    """The solver key is a jit static argument, so configs must stay hashable."""
+    a = OptimizerConfig(solver="adamw", solver_options={"weight_decay": 1e-3})
+    b = OptimizerConfig(solver="adamw", solver_options={"weight_decay": 1e-3})
+    assert hash(a) == hash(b)
+    assert a == b
+    assert a.solver_spec() == b.solver_spec()
+
+
 def test_long_short_config_permits_negative_weights():
     # A strongly negative-drift asset should be shortable when long_only=False.
     r = jf.generate_returns(n_assets=5, seed=9, mean_annual_return=0.0)

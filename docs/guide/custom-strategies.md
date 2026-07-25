@@ -76,7 +76,9 @@ built-ins use:
 
 Pass a [`config`](../reference/types.md#jaxfolio.types.OptimizerConfig) to
 `from_objective` to control the constraint set (long-only, weight bounds) and
-solver settings.
+solver settings. `config.solver` and `config.solver_options` are honored too, so
+a custom objective can be minimized with any optax optimizer — see
+[Choosing a solver](optimizers.md#choosing-a-solver).
 
 ## Mode 3 — the toolkit, by hand
 

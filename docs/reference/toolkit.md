@@ -10,6 +10,12 @@ The public building blocks for authoring strategies. See the
       heading_level: 3
       members: true
 
+## Solver selection
+
+::: jaxfolio.solvers
+    options:
+      heading_level: 3
+
 ## Custom strategy authoring
 
 ::: jaxfolio.custom

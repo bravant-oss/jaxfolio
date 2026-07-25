@@ -35,7 +35,8 @@ don't share a numerical foundation.
 **jaxfolio unifies them on a single differentiable core.** Sixteen optimizers —
 classical, learning-based, and graph-based — sit behind one interface,
 `method(returns) → PortfolioResult`, and every constrained method is the *same*
-jit-compiled projected-gradient solver with a different objective. Because the
+jit-compiled projected-gradient solver with a different objective — driven by a
+self-tuning spectral step or by any optax optimizer you name. Because the
 whole pipeline (moment estimation → optimization → backtest) is JAX, it is
 end-to-end differentiable and fast: you can backtest thousands of rebalances,
 differentiate through an optimizer to train an allocation policy, and get exact
