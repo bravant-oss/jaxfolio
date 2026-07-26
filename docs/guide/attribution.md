@@ -141,9 +141,13 @@ The same fields, formatted for whoever is reading. None of them recompute anythi
 | `to_frame()` / `constraints_frame()` | pandas — sorting, filtering, joining |
 | `result.metadata` | a backtest log — the five-key digest, always present |
 
-`to_table()` is the one to print. It is deliberately **pure ASCII** — a report ends up
-in a log file, a CI artifact or a Windows console, and `<=` survives an encoding that
-`≤` does not:
+`to_table()` is the one to print. Every string **jaxfolio wrote** is folded to ASCII on
+the way in — a report ends up in a log file, a CI artifact or a Windows console, and
+`<=` survives an encoding that `≤` does not. The reasons and warnings are written for
+this guide, so they arrive full of em dashes; the fold is a transliteration, not a
+filter, so nothing a reader needs is lost. Your *own* strings — asset names, constraint
+names — pass through verbatim, because mangling a ticker to fit a charset is the worse
+trade:
 
 ```
 ==============================================================================

@@ -48,9 +48,12 @@ This file is generated with [git-cliff](https://git-cliff.org) from
   Capturing the diagnostics never perturbs the weights — asserted bit-identical.
   A report renders five ways, for five readers: `explain_text()` as prose,
   `to_table()` as a printed report (header block, constraints table, assets table,
-  notes — deliberately pure ASCII so it survives a log file, a CI artifact and a
-  non-UTF-8 console), `to_dict()` / `to_json()` serialized whole, the pandas frames,
-  and the `metadata` digest. The refusals survive both new formats: a suppressed
+  notes), `to_dict()` / `to_json()` serialized whole, the pandas frames, and the
+  `metadata` digest. `to_table()` folds every string *jaxfolio* wrote to ASCII — the
+  reasons and warnings are written for the guide and arrive full of em dashes, while a
+  printed report has to survive a log file, a CI artifact and a non-UTF-8 console. The
+  fold is a transliteration, not a filter; asset and constraint names are user data and
+  pass through verbatim. The refusals survive both new formats: a suppressed
   shadow price prints as `n/a` and serializes as `null`, never as a `0.0` that would
   read as "this constraint costs nothing"; `to_table(max_assets=…)` announces what it
   dropped rather than letting a truncated report look complete; and the serialized

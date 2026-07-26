@@ -23,6 +23,7 @@ the refusal actually fires.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import pickle
 import re
@@ -576,8 +577,17 @@ def test_to_table_prints_every_row_and_every_asset(panel, names):
     "build",
     [
         pytest.param(lambda p, n: _capped(p, n), id="binding-cap"),
-        # Each of these carries a long sentence — a budget note, a quality reason, a
-        # non-convexity warning — that would run past 150 columns unwrapped.
+        # Each of these carries a long sentence written for the guide — a budget note, a
+        # quality reason, a warning — with the em dashes and math symbols that go with
+        # it. They would run past 150 columns unwrapped, and break an ASCII console
+        # unfolded. `l2_reg` and the unconverged solve are here because they attach that
+        # prose *deterministically*: the grade of a converged solve is
+        # platform-dependent (BLAS and jaxlib differ), so relying on it to reach this
+        # path would leave the em-dash case untested on whichever runner grades "exact".
+        pytest.param(lambda p, n: _capped(p, n, l2_reg=1e-6), id="l2-warning"),
+        pytest.param(
+            lambda p, n: _capped(p, n, solver="sgd", max_iter=5, tol=1e-7), id="unconverged"
+        ),
         pytest.param(
             lambda p, n: jf.maximum_sharpe(p, constraints=[jf.GroupCap("t", n[:4], max=TECH_CAP)]),
             id="scale-invariant",
@@ -591,10 +601,51 @@ def test_to_table_prints_every_row_and_every_asset(panel, names):
 )
 def test_to_table_is_ascii_and_stays_within_a_terminal(panel, names, build):
     """A printed report lands in log files and non-UTF-8 consoles; keep it plain."""
-    table = explain(build(panel, names)).to_table()
+    report = explain(build(panel, names))
+    table = report.to_table()
     table.encode("ascii")  # raises if typography leaked in from the prose rendering
     widest = max(table.splitlines(), key=len)
     assert len(widest) <= 100, f"{len(widest)} columns: {widest!r}"
+    # The prose is folded, not dropped: whatever the report had to say still shows up.
+    for note in (*report.warnings, report.reason or ""):
+        if note:
+            assert note.split("—")[0].split("·")[0].strip()[:40] in table
+
+
+def test_to_table_folds_a_grade_dependent_warning(panel, names):
+    """Regression: the "approximate" grade attaches a warning carrying an em dash.
+
+    Which grade a converged solve earns depends on the last bits of the residual, so CI
+    reached this path on Ubuntu/py3.12 while the author's machine graded "exact" and
+    never rendered the warning at all. Pinned here with the warning set explicitly, so
+    the fold is tested on every platform rather than on whichever one grades loosely.
+    """
+    report = explain(_capped(panel, names))
+    graded = dataclasses.replace(
+        report,
+        quality="approximate",
+        warnings=("multipliers are approximate — treat magnitudes as indicative, not exact",),
+    )
+    table = graded.to_table()
+    table.encode("ascii")
+    assert "treat magnitudes as indicative" in table
+
+
+def test_to_table_states_each_caveat_once(panel, names):
+    """Two phrasings of one caveat read as two caveats."""
+    table = explain(_capped(panel, names, l2_reg=1e-6)).to_table(max_assets=1)
+    assert table.count("l2_reg=1e-06 is active") == 1
+
+
+def test_to_table_folds_typography_without_losing_content():
+    """The fold is a transliteration, not a filter — nothing a reader needs is dropped."""
+    from jaxfolio.attribution import _ascii
+
+    assert _ascii("a — b · c ≤ d") == "a -- b - c <= d"
+    assert _ascii("‖∇f‖ and λ, θ, β") == "||grad f|| and lambda, theta, beta"
+    assert _ascii("plain text").isascii()
+    assert _ascii("café").isascii(), "an accent is dropped rather than raising"
+    assert _ascii("日本語"), "an untransliterable string still renders as something"
 
 
 def test_to_table_truncation_is_announced(panel, names):
@@ -640,7 +691,10 @@ def test_to_dict_is_json_safe_and_complete(panel, names):
 
     assert payload["schema"] == "jaxfolio.constraint_report/1"
     assert payload["available"] is True
-    assert payload["quality"] == "exact"
+    # Not `== "exact"`: whether a converged solve grades exact or approximate depends on
+    # the last bits of the residual, which differ by BLAS and jaxlib build. Both grades
+    # are trusted and both fill in the same fields — that is what this test is about.
+    assert payload["quality"] in ("exact", "approximate")
     assert [c["name"] for c in payload["constraints"]] == [c.name for c in report.constraints]
     assert [a["asset"] for a in payload["assets"]] == list(report.assets)
     assert payload["assets"][0]["imposed"] == [] or set(payload["assets"][0]["imposed"][0]) == {

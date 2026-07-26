@@ -69,6 +69,7 @@ from __future__ import annotations
 
 import json
 import textwrap
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -365,6 +366,52 @@ def solver_duals(
 #: What a table cell shows when the report declines to quote a number.
 _MISSING = "n/a"
 
+#: Typography this module's own prose uses, and its ASCII equivalent. The reasons and
+#: warnings are written for the guide, so they carry em dashes and math symbols; the
+#: table has to render them on a console that may be ASCII-only. Applied to strings
+#: *jaxfolio itself* wrote — asset and constraint names are user data and pass through
+#: verbatim, because mangling a ticker to fit a charset would be worse than a wide byte.
+_ASCII_SUBS = {
+    "—": "--",  # em dash
+    "–": "-",  # en dash
+    "·": "-",  # middle dot
+    "≤": "<=",
+    "≥": ">=",
+    "‘": "'",
+    "’": "'",
+    "“": '"',
+    "”": '"',
+    "…": "...",
+    "→": "->",
+    "×": "x",
+    "≈": "~",
+    "≠": "!=",
+    "∑": "sum",
+    "∇": "grad ",
+    "‖": "||",
+    "λ": "lambda",
+    "θ": "theta",
+    "β": "beta",
+    "Σ": "Sigma",
+    "τ": "tau",
+}
+
+
+def _ascii(text: str) -> str:
+    """Transliterate jaxfolio's own prose to ASCII, losing nothing a reader needs.
+
+    Known typography maps to its obvious equivalent; anything unforeseen is decomposed
+    (so an accent is dropped rather than the character lost) and only then replaced, so
+    this can never raise — a report that fails to render is worse than one that spells
+    a dash as two hyphens.
+    """
+    for char, replacement in _ASCII_SUBS.items():
+        text = text.replace(char, replacement)
+    if text.isascii():
+        return text
+    stripped = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    return stripped if stripped.strip() else text.encode("ascii", "replace").decode()
+
 
 def _json_float(value: object) -> float | None:
     """A float JSON can hold, or ``None`` — never a numpy scalar, NaN or infinity."""
@@ -438,13 +485,14 @@ def _render_table(
 
 
 def _wrap(text: str, *, bullet: str = "", width: int = 78) -> list[str]:
-    """Wrap a sentence to ``width``, hanging-indented under its bullet.
+    """ASCII-fold a sentence and wrap it to ``width``, hanging-indented under its bullet.
 
     The tables set their own width from their content; the prose around them is what
     would otherwise run to 150 columns and make the report unreadable in a terminal.
+    Folding happens before wrapping, since ``--`` is a character wider than ``—``.
     """
     return textwrap.wrap(
-        text,
+        _ascii(text),
         width=width,
         initial_indent=bullet,
         subsequent_indent=" " * len(bullet),
@@ -677,8 +725,10 @@ class ConstraintReport:
 
         Same facts as :meth:`explain_text`, laid out as columns instead of prose: a
         header block, one row per named constraint, one row per asset, and the notes
-        that qualify them. Pure ASCII and pure text, so it survives a log file, a CI
-        artifact and a non-UTF-8 console unchanged.
+        that qualify them. Plain text, and every string jaxfolio itself wrote is folded
+        to ASCII, so the report survives a log file, a CI artifact and a non-UTF-8
+        console. Asset and constraint *names* are yours and pass through verbatim — a
+        report that mangles a ticker to fit a charset would be the worse trade.
 
         Parameters
         ----------
@@ -695,11 +745,11 @@ class ConstraintReport:
         >>> print(jf.explain(result).to_table())  # doctest: +SKIP
         """
         rule = "=" * 78
-        out = [rule, f"CONSTRAINT ATTRIBUTION -- {self.method}", rule]
+        out = [rule, f"CONSTRAINT ATTRIBUTION -- {_ascii(self.method)}", rule]
 
         fields = [("assets", str(len(self.assets)))]
         if self.objective:
-            fields.append(("objective", f"{self.objective} ({self.sense})"))
+            fields.append(("objective", f"{_ascii(self.objective)} ({self.sense})"))
         fields.append(("dual quality", self.quality))
         if self.stationarity is not None:
             fields.append(("stationarity", f"{self.stationarity:.2e}"))
@@ -784,11 +834,8 @@ class ConstraintReport:
             lines += extra_notes
             if self.reason and self.available:  # an unavailable reason is already printed above
                 lines.append(self.reason)
-            if self.l2_reg:
-                lines.append(
-                    f"l2_reg={self.l2_reg:g} is active, so the multipliers price the "
-                    "penalized objective"
-                )
+            # No l2_reg note of our own: `warnings` already carries that one, in more
+            # detail. Two phrasings of one caveat read as two caveats.
             lines += list(self.warnings)
             out += ["", "NOTES"]
             for line in lines:
