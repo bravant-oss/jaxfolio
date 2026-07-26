@@ -130,6 +130,7 @@ viz.save(viz.dashboard(results, returns), "dashboard.png")
 | Family | Methods |
 |---|---|
 | **Traditional** | min-variance · mean-variance · max-Sharpe · max-diversification · risk parity (ERC) · Kelly · min-CVaR · Black–Litterman |
+| **Constraints** | named sector/group caps, floors and bands · per-asset bound vectors · exact projection, so a cap is a guarantee |
 | **Learning** | differentiable MLP Sharpe policy · online exponentiated-gradient |
 | **Graph** | hierarchical risk parity (HRP) · HERC · MST centrality |
 | **LLM (local)** | LLM → Black–Litterman views · news-sentiment tilt · multi-agent debate |

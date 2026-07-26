@@ -453,6 +453,20 @@ def multi_period_mean_variance(
     (4, 5)
     """
     config = config or OptimizerConfig(tol=1e-6)
+    if config.constraints:
+        # The row-wise projection kernels *can* take group caps — the feasible set
+        # is still a Cartesian product over periods, so a per-period cap preserves
+        # the structure this solver depends on. What is not settled is what a user
+        # means by a cap here: per period, or on the horizon average? Rather than
+        # guess, reject until the semantics are chosen. Never silently ignore.
+        named = ", ".join(repr(c.name) for c in config.constraints)
+        raise NotImplementedError(
+            f"multi_period_mean_variance does not yet support named constraints ({named}). "
+            "Per-period group caps are expressible — the projection is applied row-wise, so "
+            "the feasible set stays a product over periods — but caps on a horizon aggregate "
+            "are not, and which one a cap should mean is undecided. Use scalar "
+            "`weight_bounds` for now, or apply the cap with a single-period optimizer."
+        )
     if horizon < 1:
         raise ValueError(f"horizon must be at least 1, got {horizon}")
     costs = costs if costs is not None else TradingCosts()

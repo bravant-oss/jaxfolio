@@ -142,7 +142,12 @@ class CustomStrategy:
         def run(returns) -> PortfolioResult:
             mu, cov, names, mat = tk.moments(returns)
             ctx = _Context(mu=mu, cov=cov, returns=mat, assets=names)
-            projection = tk.make_projection(cfg.long_only, cfg.bounds())
+            projection = tk.make_projection(
+                cfg.long_only,
+                cfg.bounds(),
+                constraints=cfg.constraints,
+                assets=names,
+            )
             w, info = tk.solve_projected_gradient(
                 lambda w: objective_fn(w, ctx),
                 tk.equal_start(len(names)),

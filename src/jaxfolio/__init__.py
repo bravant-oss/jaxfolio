@@ -14,6 +14,7 @@ Quickstart
 
 from __future__ import annotations
 
+from jaxfolio.constraints import Box, Budget, GroupCap, GroupFloor, InfeasibleConstraints
 from jaxfolio.custom import CustomStrategy, custom_strategy
 from jaxfolio.data import (
     generate_prices,
@@ -70,6 +71,12 @@ __all__ = [
     # types
     "PortfolioResult",
     "OptimizerConfig",
+    # named constraints
+    "Box",
+    "Budget",
+    "GroupCap",
+    "GroupFloor",
+    "InfeasibleConstraints",
     "TradingCosts",
     "available_solvers",
     # registry & custom strategies

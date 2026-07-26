@@ -112,6 +112,7 @@ viz.save(viz.dashboard(results, returns), "dashboard.png")
 |---|---|
 | **Traditional** | min-variance · mean-variance · max-Sharpe · max-diversification · risk parity (ERC) · Kelly · min-CVaR · Black–Litterman |
 | **Multi-period** | path-aware, cost-aware mean-variance over a horizon · bid-ask spread + fees + quadratic market impact priced *inside* the objective · returns an execution trajectory, not just a target |
+| **Constraints** | named sector/group caps, floors and bands · per-asset bound vectors · caps are *guarantees*, enforced by an exact projection, not a penalty · infeasible sets rejected up front with the gap quantified |
 | **Learning** | differentiable MLP Sharpe policy · online exponentiated-gradient |
 | **Graph** | hierarchical risk parity (HRP) · HERC · MST centrality |
 | **LLM (local)** | LLM→Black-Litterman views · news-sentiment tilt · multi-agent debate — all on a local Ollama model, no API keys |

@@ -41,7 +41,7 @@ a ``solver_options`` value costs exactly one recompile.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from functools import partial
 from typing import Any
 
@@ -50,6 +50,7 @@ import jax.numpy as jnp
 import optax
 
 from jaxfolio.constraints.projections import project_box_budget, project_simplex
+from jaxfolio.constraints.structured import project_box_budget_vec, project_grouped
 from jaxfolio.solvers import SolverSpec, build_optimizer, resolve_solver
 
 Array = jnp.ndarray
@@ -65,8 +66,32 @@ def make_projection(
     long_only: bool,
     weight_bounds: tuple[float, float],
     budget: float = 1.0,
+    *,
+    constraints: Sequence[Any] = (),
+    assets: Sequence[str] | None = None,
 ) -> Callable[[Array], Array]:
-    """Return the ``w -> w`` projection matching the requested constraint set."""
+    """Return the ``w -> w`` projection matching the requested constraint set.
+
+    ``constraints`` accepts named specifications from
+    :mod:`jaxfolio.constraints.spec` (sector caps, per-asset bound vectors). They
+    need ``assets`` — the panel's asset names in order — to resolve names to
+    columns; pass integer-indexed specs to skip that. The closure form re-traces
+    per call anyway, so unlike :func:`select_projection` there is no cache concern
+    here.
+    """
+    if constraints:
+        from jaxfolio.constraints.compile import compile_constraints
+
+        if assets is None:
+            raise ValueError(
+                "make_projection: named constraints need `assets` (the panel's asset names) "
+                "to resolve names to columns"
+            )
+        compiled = compile_constraints(
+            constraints, assets, long_only=long_only, weight_bounds=weight_bounds
+        )
+        fn, pparams = projection_for(compiled)
+        return lambda w: fn(w, pparams)
     lo, hi = weight_bounds
     if long_only and lo <= 0.0 and hi >= 1.0:
         # Plain probability simplex is cheaper and exact.
@@ -118,12 +143,97 @@ def _proj_box_path(W: Array, pparams) -> Array:
     return jax.vmap(project_box_budget, in_axes=(0, None, None, None))(W, lo, hi, budget)
 
 
+# --- Named-constraint kernels (per-asset bound vectors, disjoint group rows) --- #
+def _proj_boxvec(x: Array, pparams) -> Array:
+    lower, upper, budget = pparams
+    return project_box_budget_vec(x, lower, upper, budget)
+
+
+def _proj_grouped(x: Array, pparams) -> Array:
+    lower, upper, budget, gid, g_lower, g_upper = pparams
+    return project_grouped(x, lower, upper, budget, gid, g_lower, g_upper)
+
+
+def _as_aux(core: Callable[[Array, tuple], Array]) -> Callable[[Array, tuple], Array]:
+    """Wrap a projection so it acts only on the weight block of ``[w, aux]``."""
+
+    def proj(z: Array, pparams) -> Array:
+        return jnp.concatenate([core(z[:-1], pparams), z[-1:]])
+
+    return proj
+
+
+def _as_path(core: Callable[[Array, tuple], Array]) -> Callable[[Array, tuple], Array]:
+    """Wrap a projection so it acts row-wise on a ``(T, N)`` weight path."""
+
+    def proj(W: Array, pparams) -> Array:
+        return jax.vmap(core, in_axes=(0, None))(W, pparams)
+
+    return proj
+
+
+# Projection lookup, keyed by ``(kind, shape)``. Built **once at import time**, so
+# every entry has a stable ``id()`` for the lifetime of the process — which is the
+# real requirement behind the "keep them at module scope" note above. A table
+# rebuilt per call would silently reintroduce a recompile on every solve, so if
+# this is ever refactored, keep the construction at import time and keep the
+# regression test that asserts ``_PROJECTIONS[k] is _PROJECTIONS[k]``.
+#
+# The existing four scalar entries reuse the hand-written functions above rather
+# than wrappers, so their identities — and hence the jit cache entries of every
+# pre-existing solve — are untouched.
+_CORES: dict[str, Callable[[Array, tuple], Array]] = {
+    "simplex": _proj_simplex,
+    "box": _proj_box,
+    "boxvec": _proj_boxvec,
+    "grouped": _proj_grouped,
+}
+
+_PROJECTIONS: dict[tuple[str, str], Callable[[Array, tuple], Array]] = {
+    ("simplex", "plain"): _proj_simplex,
+    ("box", "plain"): _proj_box,
+    ("simplex", "aux"): _proj_simplex_aux,
+    ("box", "aux"): _proj_box_aux,
+    ("simplex", "path"): _proj_simplex_path,
+    ("box", "path"): _proj_box_path,
+    ("boxvec", "plain"): _proj_boxvec,
+    ("boxvec", "aux"): _as_aux(_proj_boxvec),
+    ("boxvec", "path"): _as_path(_proj_boxvec),
+    ("grouped", "plain"): _proj_grouped,
+    ("grouped", "aux"): _as_aux(_proj_grouped),
+    ("grouped", "path"): _as_path(_proj_grouped),
+}
+
+
+def _shape_key(aux: bool, path: bool) -> str:
+    if aux and path:
+        raise ValueError(
+            "aux and path are mutually exclusive — aux packs a scalar tail onto a "
+            "1-D vector, path batches rows of a 2-D weight path"
+        )
+    return "aux" if aux else "path" if path else "plain"
+
+
+def projection_for(compiled, *, aux: bool = False, path: bool = False) -> tuple[Any, tuple]:
+    """Return ``(projection_fn, pparams)`` for a compiled constraint set.
+
+    The counterpart of :func:`select_projection` for named constraints. The
+    function object is looked up from the import-time table so its identity is
+    stable, and ``pparams`` carries every constraint *value* as a traced argument
+    — so changing a cap or a bound never recompiles. See
+    :mod:`jaxfolio.constraints.compile` for the full cache contract.
+    """
+    return _PROJECTIONS[(compiled.kind, _shape_key(aux, path))], compiled.pparams()
+
+
 def select_projection(
     long_only: bool,
     weight_bounds: tuple[float, float],
     *,
     aux: bool = False,
     path: bool = False,
+    constraints: Sequence[Any] = (),
+    assets: Sequence[str] | None = None,
 ):
     """Return ``(projection_fn, pparams)`` for the cached kernel.
 
@@ -132,12 +242,26 @@ def select_projection(
     selects the row-wise variant for a ``(T, N)`` weight path (used by the
     multi-period optimizer). ``pparams`` is a tuple of Python floats — passed as
     a traced argument to the kernel, and identical for all three variants.
+
+    ``constraints`` accepts named specifications from
+    :mod:`jaxfolio.constraints.spec`, which need ``assets`` to resolve names to
+    columns. With no named constraints this returns exactly what it always did:
+    the same function object and the same Python-float tuple, so no pre-existing
+    solve changes kernel, cache entry, or dtype.
     """
-    if aux and path:
-        raise ValueError(
-            "select_projection: aux and path are mutually exclusive — aux packs a "
-            "scalar tail onto a 1-D vector, path batches rows of a 2-D weight path"
+    if constraints:
+        from jaxfolio.constraints.compile import compile_constraints
+
+        if assets is None:
+            raise ValueError(
+                "select_projection: named constraints need `assets` (the panel's asset "
+                "names) to resolve names to columns"
+            )
+        compiled = compile_constraints(
+            constraints, assets, long_only=long_only, weight_bounds=weight_bounds
         )
+        return projection_for(compiled, aux=aux, path=path)
+    _shape_key(aux, path)  # validate the aux/path combination
     lo, hi = weight_bounds
     simplex = long_only and lo <= 0.0 and hi >= 1.0
     if simplex:

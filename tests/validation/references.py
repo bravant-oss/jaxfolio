@@ -186,3 +186,60 @@ def multi_period_objective(path, mu, cov, w_prev, *, risk_aversion, c_lin, c_qua
         mu @ path[t] - 0.5 * risk_aversion * (path[t] @ cov @ path[t]) for t in range(len(path))
     )
     return float(utility - c_lin * np.abs(d).sum() - c_quad * (d**2).sum())
+
+
+def ref_grouped_projection_cvxpy(v, lower, upper, budget, groups, g_lower, g_upper):
+    """Euclidean projection onto box + budget + group rows, solved by CVXPY.
+
+    The independent reference for :func:`jaxfolio.constraints.structured.
+    project_grouped_duals`. Returns ``(w, lam, theta)`` with the multipliers already
+    translated into jaxfolio's convention: every row is written as ``a'w <= U`` and
+    ``a'w >= L`` under ``cp.Minimize``, and ``theta_k`` is the *net* dual
+    ``dual(cap) - dual(floor)`` — positive when the cap binds, negative when the
+    floor does.
+
+    NOTE: the objective is ``0.5 * sum_squares(w - v)``, matching the projection's
+    definition exactly. A stray factor of two here would scale every multiplier by
+    two and the test would still "pass" against a consistently wrong kernel.
+
+    Imported lazily so callers can ``importorskip``.
+    """
+    import cvxpy as cp
+
+    n = len(v)
+    w = cp.Variable(n)
+    cons = [w >= lower, w <= upper, cp.sum(w) == budget]
+    budget_con = cons[2]
+    rows = []
+    for members, low, high in zip(groups, g_lower, g_upper, strict=True):
+        a = np.zeros(n)
+        a[list(members)] = 1.0
+        cap = cp.sum(cp.multiply(a, w)) <= high
+        floor = cp.sum(cp.multiply(a, w)) >= low
+        cons += [cap, floor]
+        rows.append((cap, floor))
+    prob = cp.Problem(cp.Minimize(0.5 * cp.sum_squares(w - v)), cons)
+    prob.solve(solver=cp.CLARABEL, tol_gap_abs=1e-12, tol_gap_rel=1e-12, tol_feas=1e-12)
+    theta = np.array([float(c.dual_value) - float(f.dual_value) for c, f in rows])
+    return np.asarray(w.value), float(budget_con.dual_value), theta
+
+
+def ref_min_variance_grouped_cvxpy(cov, lower, upper, groups, g_upper, l2: float = 0.0):
+    """Long-only minimum variance under group caps, solved by CVXPY.
+
+    Mirrors ``_minvar_objective`` exactly: ``w'Sigma w + l2 * ||w||^2`` with **no**
+    factor of one half, so the multipliers are directly comparable.
+    """
+    import cvxpy as cp
+
+    n = cov.shape[0]
+    w = cp.Variable(n)
+    cons = [w >= lower, w <= upper, cp.sum(w) == 1.0]
+    for members, high in zip(groups, g_upper, strict=True):
+        a = np.zeros(n)
+        a[list(members)] = 1.0
+        cons.append(cp.sum(cp.multiply(a, w)) <= high)
+    obj = cp.quad_form(w, cp.psd_wrap(cov)) + l2 * cp.sum_squares(w)
+    prob = cp.Problem(cp.Minimize(obj), cons)
+    prob.solve(solver=cp.CLARABEL, tol_gap_abs=1e-12, tol_gap_rel=1e-12, tol_feas=1e-12)
+    return np.asarray(w.value), float(prob.value)
