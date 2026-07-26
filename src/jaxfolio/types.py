@@ -76,6 +76,25 @@ class OptimizerConfig:
         step. Prefer ``"spg"`` when you want the exact constrained optimum.
     l2_reg:
         Optional L2 penalty on weights (encourages diversification).
+    constraints:
+        Named constraint specifications from :mod:`jaxfolio.constraints` — sector
+        caps, per-asset bound vectors, an explicit budget::
+
+            OptimizerConfig(constraints=[
+                GroupCap("tech", ["AAPL", "MSFT"], max=0.30),
+                Box(lower=0.0, upper=0.10),
+            ])
+
+        Unlike ``long_only`` / ``weight_bounds``, these carry a **name**, which is
+        what lets the solver's Lagrange multiplier for each one be reported as an
+        attributable shadow price. Group rows must partition the universe (each
+        asset in at most one group). Empty by default, and an empty set reproduces
+        the previous behaviour exactly — same solver kernel, same numbers.
+
+        Validation is two-stage, like ``solver``: structural problems (duplicate
+        names, a bad type) are caught here, while feasibility needs the asset
+        universe and is checked by
+        :func:`jaxfolio.constraints.compile_constraints` at solve time.
     """
 
     risk_free_rate: float = 0.0
@@ -90,11 +109,41 @@ class OptimizerConfig:
     learning_rate: float | None = None
     tol: float = 1e-7
     l2_reg: float = 0.0
+    # Kept a tuple, not a list: this dataclass must stay hashable because it is
+    # used as a ``functools.partial`` payload and a dict key by the backtester.
+    constraints: tuple[Any, ...] = ()
 
     def __post_init__(self) -> None:
         # Fail fast, at construction, with a suggestion — rather than deep inside
         # the solver after the moments have already been estimated.
         self.solver_spec()
+        if self.constraints:
+            object.__setattr__(self, "constraints", tuple(self.constraints))
+            self._validate_constraints()
+
+    def _validate_constraints(self) -> None:
+        """Structural checks on ``constraints`` (feasibility comes later)."""
+        from jaxfolio.constraints.spec import Constraint  # lazy: avoids an import cycle
+
+        seen: set[str] = set()
+        for spec in self.constraints:
+            if not isinstance(spec, Constraint):
+                raise TypeError(
+                    "OptimizerConfig.constraints entries must be jaxfolio.constraints "
+                    f"specifications (GroupCap, Box, Budget, ...), got {type(spec).__name__}"
+                )
+            if spec.name in seen:
+                raise ValueError(
+                    f"OptimizerConfig.constraints has two entries named {spec.name!r}; "
+                    "names must be unique so attribution can refer to them unambiguously"
+                )
+            seen.add(spec.name)
+
+    def with_constraints(self, constraints: Any) -> OptimizerConfig:
+        """Return a copy carrying ``constraints``."""
+        from dataclasses import replace
+
+        return replace(self, constraints=tuple(constraints))
 
     def solver_spec(self) -> SolverSpec:
         """Resolve ``solver`` / ``solver_options`` into a hashable solver key."""
