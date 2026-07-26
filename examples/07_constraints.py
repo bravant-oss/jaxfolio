@@ -17,7 +17,7 @@ import numpy as np
 
 import jaxfolio as jf
 from jaxfolio import viz
-from jaxfolio.constraints import InfeasibleConstraints, compile_constraints
+from jaxfolio.constraints import InfeasibleConstraints
 
 OUT = Path(__file__).parent / "output"
 OUT.mkdir(exist_ok=True)
@@ -83,46 +83,28 @@ def main() -> None:
     )
     print(f"annualized volatility  : {free.volatility:.4f} -> {capped.volatility:.4f}")
 
-    # --- 3. Shadow prices ------------------------------------------------- #
+    # --- 3. Shadow prices and attribution ------------------------------- #
     print("\n" + "=" * 72)
-    print("3. Shadow prices — the multipliers the projection already computes")
+    print("3. Why each asset is where it is")
     print("=" * 72)
 
-    import jax.numpy as jnp
-
-    from jaxfolio.constraints.structured import project_grouped_duals
-
-    compiled = compile_constraints(
-        [
+    detailed = jf.minimum_variance(
+        returns,
+        constraints=[
             jf.GroupCap("tech", tech, max=TECH_CAP),
             jf.GroupCap("energy", energy, max=0.50),
             jf.GroupCap("financials", financials, max=0.90),
         ],
-        assets,
     )
-    # Probe the projection at the *unconstrained* optimum: the multipliers price
-    # how hard each row has to push to pull that point back into the feasible set.
-    lower, upper, budget, gid, g_lo, g_hi = compiled.pparams()
-    duals = project_grouped_duals(jnp.asarray(free.weights), lower, upper, budget, gid, g_lo, g_hi)
-    print(f"{'constraint':<14} {'exposure':>10} {'limit':>8} {'multiplier':>12} {'status':>14}")
-    for k, name in enumerate(compiled.row_names):
-        members = compiled.members(name)
-        theta = float(duals.rows[k])
-        if not bool(duals.identified[k]):
-            status = "not identified"
-        elif theta == 0.0:
-            status = "slack"
-        else:
-            status = "BINDING"
-        print(
-            f"{name:<14} {_exposure(duals.weights, assets, members):>10.4f} "
-            f"{compiled.row_upper[k]:>8.2f} {theta:>+12.5f} {status:>14}"
-        )
+    report = jf.explain(detailed)
+    print(report.explain_text(top_n=6))
+
+    print("\n" + report.constraints_frame().to_string())
     print(
-        "\nA zero multiplier on a slack row is exact, not a rounding artifact. "
-        "'not identified'\nmeans every member sits on a bound, so the split between "
-        "the row and the box is\narbitrary — the report declines to quote a number "
-        "it cannot stand behind."
+        "\nA zero multiplier on a slack row is exact, not a rounding artifact.\n"
+        "'unidentified' means every member of the row sits on a bound, so the split\n"
+        "between the row and the box is arbitrary — the report then declines to name\n"
+        "a cause rather than quoting a number it cannot stand behind."
     )
 
     # --- 4. Infeasibility is caught before any solve ---------------------- #

@@ -76,6 +76,11 @@ class OptimizerConfig:
         step. Prefer ``"spg"`` when you want the exact constrained optimum.
     l2_reg:
         Optional L2 penalty on weights (encourages diversification).
+    attribution:
+        Capture the first-order (KKT) diagnostics needed by
+        :func:`jaxfolio.attribution.explain` on every solve. Costs one extra
+        gradient and two extra projections, both outside the solver loop. Set to
+        ``False`` in tight backtest loops where the explanation is never read.
     constraints:
         Named constraint specifications from :mod:`jaxfolio.constraints` — sector
         caps, per-asset bound vectors, an explicit budget::
@@ -112,6 +117,7 @@ class OptimizerConfig:
     # Kept a tuple, not a list: this dataclass must stay hashable because it is
     # used as a ``functools.partial`` payload and a dict key by the backtester.
     constraints: tuple[Any, ...] = ()
+    attribution: bool = True
 
     def __post_init__(self) -> None:
         # Fail fast, at construction, with a suggestion — rather than deep inside
@@ -362,6 +368,16 @@ class PortfolioResult:
         row 0 equals ``weights``. ``None`` for every single-period optimizer.
         :func:`jaxfolio.backtest.backtest` executes this path step by step when
         it is present.
+    attribution:
+        Optional :class:`jaxfolio.attribution.SolverDuals` — the first-order
+        diagnostics captured at the solve, from which
+        :func:`jaxfolio.attribution.explain` reconstructs which constraints bind
+        and what they cost. ``None`` for optimizers that solve no constrained
+        program (equal-weight, risk parity, the graph and learning methods), and
+        whenever ``OptimizerConfig.attribution`` is ``False``. ``explain`` never
+        *requires* it: a missing payload yields a well-formed report that says so.
+        Kept out of ``metadata`` because it holds bulk arrays; a small
+        JSON-serializable digest of it *is* placed in ``metadata``.
     """
 
     weights: np.ndarray
@@ -372,6 +388,7 @@ class PortfolioResult:
     sharpe: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     trajectory: np.ndarray | None = None
+    attribution: Any | None = None
 
     def __post_init__(self) -> None:
         self.weights = np.asarray(self.weights, dtype=float).reshape(-1)

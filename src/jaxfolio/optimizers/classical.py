@@ -16,13 +16,13 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpy as np
 
+from jaxfolio.constraints.compile import compile_constraints
 from jaxfolio.moments.estimators import (
     as_matrix,
     mean_returns,
     sample_covariance,
 )
 from jaxfolio.optimizers.base import (
-    select_projection,
     sharpe_ratio,
     solve_constrained,
 )
@@ -82,9 +82,19 @@ def _finalize(
     cov: Array,
     risk_free: float,
     metadata: dict | None = None,
+    attribution=None,
 ) -> PortfolioResult:
     """Assemble a PortfolioResult with annualized diagnostics (see toolkit)."""
-    return finalize_result(w, names, method, mu=mu, cov=cov, risk_free=risk_free, metadata=metadata)
+    return finalize_result(
+        w,
+        names,
+        method,
+        mu=mu,
+        cov=cov,
+        risk_free=risk_free,
+        metadata=metadata,
+        attribution=attribution,
+    )
 
 
 def _moments(returns, cov_estimator=None):
@@ -120,14 +130,50 @@ def _cfg(config: OptimizerConfig | None, constraints) -> OptimizerConfig:
     return config.with_constraints(constraints)
 
 
+def _compile(config: OptimizerConfig, names: list[str]):
+    """Resolve ``config``'s constraint set against the asset universe."""
+    return compile_constraints(
+        config.constraints,
+        names,
+        long_only=config.long_only,
+        weight_bounds=config.bounds(),
+    )
+
+
 def _projection(config: OptimizerConfig, names: list[str], *, aux: bool = False):
-    """Select the projection for ``config``, honoring any named constraints."""
-    return select_projection(
-        config.long_only,
-        config.bounds(),
-        aux=aux,
-        constraints=config.constraints,
-        assets=names,
+    """Return ``(projection, pparams, compiled)`` honoring any named constraints.
+
+    Always goes through the compiler, even with no named constraints: the compiler
+    guarantees that case returns the *identical* projection object and Python-float
+    tuple the legacy path did, and having ``compiled`` in hand is what lets the
+    attribution payload name the constraints afterwards.
+    """
+    compiled = _compile(config, names)
+    projection, pparams = compiled.projection(aux=aux)
+    return projection, pparams, compiled
+
+
+def _duals(
+    config, objective, params, compiled, w, *, name, sense, smooth=True, convex=True, aux_dim=0
+):
+    """Capture the KKT payload for ``explain``, unless the caller opted out."""
+    if not config.attribution:
+        return None
+    from jaxfolio.attribution import solver_duals
+
+    return solver_duals(
+        objective,
+        params,
+        compiled,
+        w,
+        objective_name=name,
+        sense=sense,
+        smooth=smooth,
+        convex=convex,
+        l2_reg=config.l2_reg,
+        solver_kind=config.solver_spec().kind,
+        tol=config.tol,
+        aux_dim=aux_dim,
     )
 
 
@@ -183,7 +229,7 @@ def minimum_variance(
     mu, cov, names, _ = _moments(returns)
     n = len(names)
 
-    projection, pparams = _projection(config, names)
+    projection, pparams, compiled = _projection(config, names)
     params = {"cov": cov, "l2": jnp.asarray(config.l2_reg)}
     w, info = solve_constrained(
         _minvar_objective,
@@ -201,6 +247,15 @@ def minimum_variance(
         cov,
         config.risk_free_rate,
         {"iterations": int(info["iterations"])},
+        attribution=_duals(
+            config,
+            _minvar_objective,
+            params,
+            compiled,
+            w,
+            name="variance",
+            sense="minimize",
+        ),
     )
 
 
@@ -221,7 +276,7 @@ def mean_variance(
     mu, cov, names, _ = _moments(returns)
     n = len(names)
 
-    projection, pparams = _projection(config, names)
+    projection, pparams, compiled = _projection(config, names)
     params = {
         "mu": mu,
         "cov": cov,
@@ -244,6 +299,15 @@ def mean_variance(
         cov,
         config.risk_free_rate,
         {"risk_aversion": risk_aversion, "iterations": int(info["iterations"])},
+        attribution=_duals(
+            config,
+            _meanvar_objective,
+            params,
+            compiled,
+            w,
+            name="mean-variance utility",
+            sense="maximize",
+        ),
     )
 
 
@@ -263,7 +327,7 @@ def maximum_sharpe(
     n = len(names)
     rf = config.risk_free_rate
 
-    projection, pparams = _projection(config, names)
+    projection, pparams, compiled = _projection(config, names)
     params = {"mu": mu, "cov": cov, "rf": jnp.asarray(rf), "l2": jnp.asarray(config.l2_reg)}
     w, info = solve_constrained(
         _sharpe_objective,
@@ -281,6 +345,16 @@ def maximum_sharpe(
         cov,
         rf,
         {"iterations": int(info["iterations"])},
+        attribution=_duals(
+            config,
+            _sharpe_objective,
+            params,
+            compiled,
+            w,
+            name="Sharpe ratio",
+            sense="maximize",
+            convex=False,
+        ),
     )
 
 
@@ -300,7 +374,7 @@ def maximum_diversification(
     n = len(names)
     vol = jnp.sqrt(jnp.diag(cov))
 
-    projection, pparams = _projection(config, names)
+    projection, pparams, compiled = _projection(config, names)
     params = {"cov": cov, "vol": vol, "l2": jnp.asarray(config.l2_reg)}
     w, info = solve_constrained(
         _maxdiv_objective,
@@ -318,6 +392,16 @@ def maximum_diversification(
         cov,
         config.risk_free_rate,
         {"iterations": int(info["iterations"])},
+        attribution=_duals(
+            config,
+            _maxdiv_objective,
+            params,
+            compiled,
+            w,
+            name="diversification ratio",
+            sense="maximize",
+            convex=False,
+        ),
     )
 
 
@@ -401,7 +485,7 @@ def kelly(
     mu, cov, names, mat = _moments(returns)
     n = len(names)
 
-    projection, pparams = _projection(config, names)
+    projection, pparams, compiled = _projection(config, names)
     params = {"mat": mat, "l2": jnp.asarray(config.l2_reg)}
     w, info = solve_constrained(
         _kelly_objective,
@@ -419,6 +503,15 @@ def kelly(
         cov,
         config.risk_free_rate,
         {"iterations": int(info["iterations"])},
+        attribution=_duals(
+            config,
+            _kelly_objective,
+            params,
+            compiled,
+            w,
+            name="expected log growth",
+            sense="maximize",
+        ),
     )
 
 
@@ -446,7 +539,7 @@ def min_cvar(
     t = mat.shape[0]
     scale = 1.0 / ((1.0 - alpha) * t)
 
-    projection, pparams = _projection(config, names, aux=True)
+    projection, pparams, compiled = _projection(config, names, aux=True)
     params = {"mat": mat, "scale": jnp.asarray(scale), "l2": jnp.asarray(config.l2_reg)}
 
     # Pack (w, tau) into a single vector; tau starts at 0.
@@ -477,6 +570,17 @@ def min_cvar(
         cov,
         config.risk_free_rate,
         {"alpha": alpha, "cvar": cvar, "var": float(tau), "iterations": int(info["iterations"])},
+        attribution=_duals(
+            config,
+            _cvar_objective,
+            params,
+            compiled,
+            z,
+            name="CVaR",
+            sense="minimize",
+            smooth=False,
+            aux_dim=1,
+        ),
     )
 
 
@@ -553,7 +657,7 @@ def black_litterman(
         post_mu = pi
 
     # Mean-variance optimize with the posterior returns (reuse the shared objective).
-    projection, pparams = _projection(config, names)
+    projection, pparams, compiled = _projection(config, names)
     params = {
         "mu": post_mu,
         "cov": cov,
@@ -576,4 +680,13 @@ def black_litterman(
             "n_views": len(views) if views else 0,
             "iterations": int(info["iterations"]),
         },
+        attribution=_duals(
+            config,
+            _meanvar_objective,
+            params,
+            compiled,
+            w,
+            name="mean-variance utility (posterior)",
+            sense="maximize",
+        ),
     )

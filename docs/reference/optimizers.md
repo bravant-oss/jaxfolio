@@ -57,3 +57,13 @@ feasibility guarantees, and what is not expressible.
 ::: jaxfolio.constraints.structured
     options:
       heading_level: 3
+
+## Attribution
+
+The explainability layer: which constraints bind, what they cost, and what the
+report will refuse to claim. See the
+[explainability guide](../guide/attribution.md).
+
+::: jaxfolio.attribution
+    options:
+      heading_level: 3

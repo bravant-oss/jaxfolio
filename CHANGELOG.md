@@ -11,6 +11,54 @@ This file is generated with [git-cliff](https://git-cliff.org) from
 
 ### Features
 
+- **Explainable optimization** — `jf.explain(result)` reports which constraints
+  bind, what each one costs, and *why* each asset holds the weight it does. A 0%
+  allocation now comes with an attribution: "excluded on its own merits" versus
+  "its sector was full", with the shadow price of the constraint responsible.
+  The multipliers are recovered from the projection itself, not from a second
+  solve: at a solution the weights are a fixed point of the projection, so
+  projecting `w* - s*grad f` and keeping the projection's own multipliers returns
+  the portfolio problem's multipliers divided by `s`. One gradient and two
+  projections, outside the solver loop, and solver-agnostic — which incidentally
+  retrofits a genuine KKT residual onto the optax solvers, whose own `residual` is
+  a weight-update norm and explicitly not an optimality test.
+  Attribution ranks the *terms* of the reduced-cost decomposition
+  (`rc = intrinsic + imposed`), not the multipliers. Ranking multipliers looks
+  right and is wrong: at a zero weight the box multiplier equals the whole reduced
+  cost, so it would dominate every group term by construction and "binding: tech"
+  could never fire.
+  Shadow prices are validated against central finite differences on re-solves of
+  the optimizer itself, to 4-5 significant figures, in all three sign regimes
+  (minimize+cap, maximize+cap, minimize+floor).
+  **The report refuses rather than guesses.** `min_cvar` gets no shadow prices at
+  all — its objective is non-smooth exactly where the optimum sits, so `jax.grad`
+  returns an arbitrary subgradient and stationarity need not hold even when exact.
+  Unconverged solves are suppressed. Scale-invariant objectives (max-Sharpe,
+  max-diversification) report no cost of capital, detected numerically via Euler's
+  identity rather than from a list of method names. Multipliers that are not pinned
+  by the data — a binding row whose every member sits on a bound — are reported as
+  `unidentified` with the affected assets marked `ambiguous`. `l2_reg` and
+  non-convexity attach warnings. Optimizers that solve no constrained program
+  (`equal_weight`, `inverse_volatility`, `risk_parity`, the graph and learning
+  methods) return a well-formed report with `available=False` and a specific
+  reason — `risk_parity`'s points at its own `risk_contributions`.
+  Adds the optional `PortfolioResult.attribution` field (following the
+  `trajectory` precedent) plus a small JSON-serializable digest in `metadata`, and
+  `OptimizerConfig(attribution=False)` to opt out in tight backtest loops.
+  Capturing the diagnostics never perturbs the weights — asserted bit-identical.
+  A report renders five ways, for five readers: `explain_text()` as prose,
+  `to_table()` as a printed report (header block, constraints table, assets table,
+  notes), `to_dict()` / `to_json()` serialized whole, the pandas frames, and the
+  `metadata` digest. `to_table()` folds every string *jaxfolio* wrote to ASCII — the
+  reasons and warnings are written for the guide and arrive full of em dashes, while a
+  printed report has to survive a log file, a CI artifact and a non-UTF-8 console. The
+  fold is a transliteration, not a filter; asset and constraint names are user data and
+  pass through verbatim. The refusals survive both new formats: a suppressed
+  shadow price prints as `n/a` and serializes as `null`, never as a `0.0` that would
+  read as "this constraint costs nothing"; `to_table(max_assets=…)` announces what it
+  dropped rather than letting a truncated report look complete; and the serialized
+  form carries plain Python scalars only (no numpy types, no `NaN`) under a versioned
+  `schema` key.
 - **Named constraints** — sector and group caps that carry an identity. Where
   `long_only` / `weight_bounds` shape the answer anonymously, `GroupCap("tech",
   [...], max=0.30)`, `GroupFloor`, `Box` (now accepting per-asset bound vectors)

@@ -90,8 +90,14 @@ class ProjectionDuals(NamedTuple):
         cap binds, negative where a floor binds, exactly zero where the row is
         slack. The last entry is the ungrouped sentinel and is always zero.
     bounds:
-        ``(n,)`` multipliers ``beta`` on the per-asset box — positive at a lower
-        bound, negative at an upper bound, zero in the interior.
+        ``(n,)`` multipliers ``beta`` on the per-asset box — **negative** at a lower
+        bound, **positive** at an upper bound, zero in the interior. This is the
+        sign that makes the stationarity identity
+        ``v - w == budget + rows[gid] + bounds`` hold as written: writing the box
+        as ``mu_lo >= 0`` on ``lower - w`` and ``mu_hi >= 0`` on ``w - upper``,
+        ``beta = mu_hi - mu_lo``. Note the *reduced cost* of the original
+        portfolio problem carries the opposite sign (positive at a lower bound),
+        because it equals ``-beta / step``; see :mod:`jaxfolio.attribution`.
     identified:
         ``(n_seg,)`` mask: is ``rows[k]`` actually pinned by the data? A row's
         multiplier is identified only when at least one of its members is
@@ -183,7 +189,7 @@ def project_box_budget_duals(
     x = v - lam
     w = jnp.clip(x, lower, upper)
     w, resid = _absorb_residual(w, lower, upper, budget, free=jnp.ones_like(w, dtype=bool))
-    # beta_i = x_i - w_i: positive where the lower bound binds, negative at the
+    # beta_i = x_i - w_i: negative where the lower bound binds, positive at the
     # upper bound, zero in the interior. Recomputed from the final w so it stays
     # consistent with the returned primal point.
     beta = jnp.where(_interior(w, lower, upper), 0.0, x - w)

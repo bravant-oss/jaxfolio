@@ -126,6 +126,7 @@ nav:
   - User guide:
       - Optimizers: guide/optimizers.md
       - Constraints: guide/constraints.md
+      - Explainability: guide/attribution.md
       - Multi-period: guide/multiperiod.md
       - Backtesting: guide/backtesting.md
       - Options: guide/options.md

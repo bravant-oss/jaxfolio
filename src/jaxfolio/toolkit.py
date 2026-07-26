@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 
+from jaxfolio.attribution import ConstraintReport, SolverDuals, explain, solver_duals
 from jaxfolio.constraints.compile import (
     CompiledConstraints,
     InfeasibleConstraints,
@@ -93,6 +94,11 @@ __all__ = [
     "InfeasibleConstraints",
     "compile_constraints",
     "check_feasible",
+    # explainability
+    "explain",
+    "solver_duals",
+    "ConstraintReport",
+    "SolverDuals",
     "ProjectionDuals",
     "project_box_budget_duals",
     "project_grouped_duals",
