@@ -23,11 +23,26 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 
+from jaxfolio.attribution import ConstraintReport, SolverDuals, explain, solver_duals
+from jaxfolio.constraints.compile import (
+    CompiledConstraints,
+    InfeasibleConstraints,
+    check_feasible,
+    compile_constraints,
+)
 from jaxfolio.constraints.projections import (
     normalize_weights,
     project_box_budget,
     project_simplex,
     softmax_weights,
+)
+from jaxfolio.constraints.spec import Box, Budget, Constraint, GroupCap, GroupFloor
+from jaxfolio.constraints.structured import (
+    ProjectionDuals,
+    project_box_budget_duals,
+    project_box_budget_vec,
+    project_grouped,
+    project_grouped_duals,
 )
 from jaxfolio.moments.estimators import (
     as_matrix,
@@ -67,6 +82,26 @@ __all__ = [
     "make_projection",
     "project_simplex",
     "project_box_budget",
+    "project_box_budget_vec",
+    "project_grouped",
+    # named constraints
+    "Box",
+    "Budget",
+    "Constraint",
+    "GroupCap",
+    "GroupFloor",
+    "CompiledConstraints",
+    "InfeasibleConstraints",
+    "compile_constraints",
+    "check_feasible",
+    # explainability
+    "explain",
+    "solver_duals",
+    "ConstraintReport",
+    "SolverDuals",
+    "ProjectionDuals",
+    "project_box_budget_duals",
+    "project_grouped_duals",
     "normalize_weights",
     "softmax_weights",
     # solver core

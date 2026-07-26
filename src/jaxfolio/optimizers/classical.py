@@ -16,13 +16,13 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpy as np
 
+from jaxfolio.constraints.compile import compile_constraints
 from jaxfolio.moments.estimators import (
     as_matrix,
     mean_returns,
     sample_covariance,
 )
 from jaxfolio.optimizers.base import (
-    select_projection,
     sharpe_ratio,
     solve_constrained,
 )
@@ -82,9 +82,19 @@ def _finalize(
     cov: Array,
     risk_free: float,
     metadata: dict | None = None,
+    attribution=None,
 ) -> PortfolioResult:
     """Assemble a PortfolioResult with annualized diagnostics (see toolkit)."""
-    return finalize_result(w, names, method, mu=mu, cov=cov, risk_free=risk_free, metadata=metadata)
+    return finalize_result(
+        w,
+        names,
+        method,
+        mu=mu,
+        cov=cov,
+        risk_free=risk_free,
+        metadata=metadata,
+        attribution=attribution,
+    )
 
 
 def _moments(returns, cov_estimator=None):
@@ -100,6 +110,87 @@ def _solver_kwargs(config: OptimizerConfig) -> dict:
         "max_iter": config.max_iter,
         "tol": config.tol,
     }
+
+
+def _cfg(config: OptimizerConfig | None, constraints) -> OptimizerConfig:
+    """Resolve the ``config`` / ``constraints`` pair into a single config.
+
+    ``constraints=`` is sugar for ``config.constraints``; supplying both is an
+    error rather than a silent precedence rule, because which one wins would be a
+    coin flip to the reader.
+    """
+    config = config or OptimizerConfig()
+    if constraints is None:
+        return config
+    if config.constraints:
+        raise ValueError(
+            "constraints were given both on OptimizerConfig and as a keyword argument; "
+            "pass one or the other"
+        )
+    return config.with_constraints(constraints)
+
+
+def _compile(config: OptimizerConfig, names: list[str]):
+    """Resolve ``config``'s constraint set against the asset universe."""
+    return compile_constraints(
+        config.constraints,
+        names,
+        long_only=config.long_only,
+        weight_bounds=config.bounds(),
+    )
+
+
+def _projection(config: OptimizerConfig, names: list[str], *, aux: bool = False):
+    """Return ``(projection, pparams, compiled)`` honoring any named constraints.
+
+    Always goes through the compiler, even with no named constraints: the compiler
+    guarantees that case returns the *identical* projection object and Python-float
+    tuple the legacy path did, and having ``compiled`` in hand is what lets the
+    attribution payload name the constraints afterwards.
+    """
+    compiled = _compile(config, names)
+    projection, pparams = compiled.projection(aux=aux)
+    return projection, pparams, compiled
+
+
+def _duals(
+    config, objective, params, compiled, w, *, name, sense, smooth=True, convex=True, aux_dim=0
+):
+    """Capture the KKT payload for ``explain``, unless the caller opted out."""
+    if not config.attribution:
+        return None
+    from jaxfolio.attribution import solver_duals
+
+    return solver_duals(
+        objective,
+        params,
+        compiled,
+        w,
+        objective_name=name,
+        sense=sense,
+        smooth=smooth,
+        convex=convex,
+        l2_reg=config.l2_reg,
+        solver_kind=config.solver_spec().kind,
+        tol=config.tol,
+        aux_dim=aux_dim,
+    )
+
+
+def _reject_constraints(config: OptimizerConfig, method: str, alternative: str) -> None:
+    """Raise if named constraints were passed to a closed-form optimizer.
+
+    These methods build their weights analytically rather than solving a
+    constrained program, so a cap could not be honored. Failing loudly beats
+    returning weights that quietly violate it.
+    """
+    if config.constraints:
+        named = ", ".join(repr(c.name) for c in config.constraints)
+        raise NotImplementedError(
+            f"{method} is a closed-form weighting and cannot honor named constraints "
+            f"({named}). It has no optimization program for a cap to constrain. "
+            f"Use {alternative} instead, which solves a constrained problem."
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -125,6 +216,8 @@ def inverse_volatility(returns) -> PortfolioResult:
 def minimum_variance(
     returns,
     config: OptimizerConfig | None = None,
+    *,
+    constraints=None,
 ) -> PortfolioResult:
     """Global minimum-variance portfolio.
 
@@ -132,11 +225,11 @@ def minimum_variance(
     spectral projected-gradient solver, which converges to the exact
     minimum-variance frontier vertex.
     """
-    config = config or OptimizerConfig()
+    config = _cfg(config, constraints)
     mu, cov, names, _ = _moments(returns)
     n = len(names)
 
-    projection, pparams = select_projection(config.long_only, config.bounds())
+    projection, pparams, compiled = _projection(config, names)
     params = {"cov": cov, "l2": jnp.asarray(config.l2_reg)}
     w, info = solve_constrained(
         _minvar_objective,
@@ -154,6 +247,15 @@ def minimum_variance(
         cov,
         config.risk_free_rate,
         {"iterations": int(info["iterations"])},
+        attribution=_duals(
+            config,
+            _minvar_objective,
+            params,
+            compiled,
+            w,
+            name="variance",
+            sense="minimize",
+        ),
     )
 
 
@@ -161,6 +263,8 @@ def mean_variance(
     returns,
     risk_aversion: float = 1.0,
     config: OptimizerConfig | None = None,
+    *,
+    constraints=None,
 ) -> PortfolioResult:
     """Markowitz mean-variance portfolio.
 
@@ -168,11 +272,11 @@ def mean_variance(
     negative) under the configured constraints. Larger ``risk_aversion`` tilts
     toward lower variance.
     """
-    config = config or OptimizerConfig()
+    config = _cfg(config, constraints)
     mu, cov, names, _ = _moments(returns)
     n = len(names)
 
-    projection, pparams = select_projection(config.long_only, config.bounds())
+    projection, pparams, compiled = _projection(config, names)
     params = {
         "mu": mu,
         "cov": cov,
@@ -195,24 +299,35 @@ def mean_variance(
         cov,
         config.risk_free_rate,
         {"risk_aversion": risk_aversion, "iterations": int(info["iterations"])},
+        attribution=_duals(
+            config,
+            _meanvar_objective,
+            params,
+            compiled,
+            w,
+            name="mean-variance utility",
+            sense="maximize",
+        ),
     )
 
 
 def maximum_sharpe(
     returns,
     config: OptimizerConfig | None = None,
+    *,
+    constraints=None,
 ) -> PortfolioResult:
     """Maximum-Sharpe (tangency) portfolio.
 
     Minimizes the negative Sharpe ratio under the configured constraints. The
     Sharpe ratio is scale-invariant, so we optimize on the simplex directly.
     """
-    config = config or OptimizerConfig()
+    config = _cfg(config, constraints)
     mu, cov, names, _ = _moments(returns)
     n = len(names)
     rf = config.risk_free_rate
 
-    projection, pparams = select_projection(config.long_only, config.bounds())
+    projection, pparams, compiled = _projection(config, names)
     params = {"mu": mu, "cov": cov, "rf": jnp.asarray(rf), "l2": jnp.asarray(config.l2_reg)}
     w, info = solve_constrained(
         _sharpe_objective,
@@ -230,24 +345,36 @@ def maximum_sharpe(
         cov,
         rf,
         {"iterations": int(info["iterations"])},
+        attribution=_duals(
+            config,
+            _sharpe_objective,
+            params,
+            compiled,
+            w,
+            name="Sharpe ratio",
+            sense="maximize",
+            convex=False,
+        ),
     )
 
 
 def maximum_diversification(
     returns,
     config: OptimizerConfig | None = None,
+    *,
+    constraints=None,
 ) -> PortfolioResult:
     """Maximum-diversification portfolio (Choueifaty & Coignard, 2008).
 
     Maximizes the diversification ratio ``(w'sigma) / sqrt(w'Sigma w)`` where
     ``sigma`` is the vector of asset volatilities.
     """
-    config = config or OptimizerConfig()
+    config = _cfg(config, constraints)
     mu, cov, names, _ = _moments(returns)
     n = len(names)
     vol = jnp.sqrt(jnp.diag(cov))
 
-    projection, pparams = select_projection(config.long_only, config.bounds())
+    projection, pparams, compiled = _projection(config, names)
     params = {"cov": cov, "vol": vol, "l2": jnp.asarray(config.l2_reg)}
     w, info = solve_constrained(
         _maxdiv_objective,
@@ -265,12 +392,24 @@ def maximum_diversification(
         cov,
         config.risk_free_rate,
         {"iterations": int(info["iterations"])},
+        attribution=_duals(
+            config,
+            _maxdiv_objective,
+            params,
+            compiled,
+            w,
+            name="diversification ratio",
+            sense="maximize",
+            convex=False,
+        ),
     )
 
 
 def risk_parity(
     returns,
     config: OptimizerConfig | None = None,
+    *,
+    constraints=None,
 ) -> PortfolioResult:
     """Equal-risk-contribution (ERC) / risk-parity portfolio.
 
@@ -282,8 +421,15 @@ def risk_parity(
     ``beta_i = (Sigma x)_i - sigma_ii x_i``, which keeps ``x_i`` strictly
     positive and is provably convergent regardless of covariance scale. Weights
     are the normalized fixed point.
+
+    Named constraints are not supported: the log-barrier keeps every ``x_i``
+    strictly positive, so no bound is ever active and the budget is imposed by
+    normalizing the fixed point rather than as a constraint — there is no
+    constrained program for a cap to enter. Use ``minimum_variance`` with a
+    ``GroupCap`` if you need one.
     """
-    config = config or OptimizerConfig()
+    config = _cfg(config, constraints)
+    _reject_constraints(config, "risk_parity", "minimum_variance or mean_variance")
     mu, cov, names, _ = _moments(returns)
     n = len(names)
     b = 1.0 / n
@@ -326,6 +472,8 @@ def risk_parity(
 def kelly(
     returns,
     config: OptimizerConfig | None = None,
+    *,
+    constraints=None,
 ) -> PortfolioResult:
     """Approximate Kelly-optimal (log-growth) portfolio.
 
@@ -333,11 +481,11 @@ def kelly(
     growth-optimal criterion. Uses the projected-gradient solver over the return
     matrix directly.
     """
-    config = config or OptimizerConfig()
+    config = _cfg(config, constraints)
     mu, cov, names, mat = _moments(returns)
     n = len(names)
 
-    projection, pparams = select_projection(config.long_only, config.bounds())
+    projection, pparams, compiled = _projection(config, names)
     params = {"mat": mat, "l2": jnp.asarray(config.l2_reg)}
     w, info = solve_constrained(
         _kelly_objective,
@@ -355,6 +503,15 @@ def kelly(
         cov,
         config.risk_free_rate,
         {"iterations": int(info["iterations"])},
+        attribution=_duals(
+            config,
+            _kelly_objective,
+            params,
+            compiled,
+            w,
+            name="expected log growth",
+            sense="maximize",
+        ),
     )
 
 
@@ -362,6 +519,8 @@ def min_cvar(
     returns,
     alpha: float = 0.95,
     config: OptimizerConfig | None = None,
+    *,
+    constraints=None,
 ) -> PortfolioResult:
     """Minimum Conditional-Value-at-Risk portfolio (Rockafellar & Uryasev, 2000).
 
@@ -374,13 +533,13 @@ def min_cvar(
     optimizer substitutes Adam whenever ``config.solver`` is ``"spg"``. An
     explicitly chosen optax optimizer is honored.
     """
-    config = config or OptimizerConfig()
+    config = _cfg(config, constraints)
     mu, cov, names, mat = _moments(returns)
     n = len(names)
     t = mat.shape[0]
     scale = 1.0 / ((1.0 - alpha) * t)
 
-    projection, pparams = select_projection(config.long_only, config.bounds(), aux=True)
+    projection, pparams, compiled = _projection(config, names, aux=True)
     params = {"mat": mat, "scale": jnp.asarray(scale), "l2": jnp.asarray(config.l2_reg)}
 
     # Pack (w, tau) into a single vector; tau starts at 0.
@@ -411,6 +570,17 @@ def min_cvar(
         cov,
         config.risk_free_rate,
         {"alpha": alpha, "cvar": cvar, "var": float(tau), "iterations": int(info["iterations"])},
+        attribution=_duals(
+            config,
+            _cvar_objective,
+            params,
+            compiled,
+            z,
+            name="CVaR",
+            sense="minimize",
+            smooth=False,
+            aux_dim=1,
+        ),
     )
 
 
@@ -423,6 +593,7 @@ def black_litterman(
     risk_aversion: float = 2.5,
     market_weights: np.ndarray | None = None,
     config: OptimizerConfig | None = None,
+    constraints=None,
 ) -> PortfolioResult:
     """Black-Litterman portfolio blending market equilibrium with investor views.
 
@@ -443,7 +614,7 @@ def black_litterman(
     market_weights:
         Prior (market-cap) weights; defaults to equal weight.
     """
-    config = config or OptimizerConfig()
+    config = _cfg(config, constraints)
     mat, names = as_matrix(returns)
     cov = sample_covariance(mat)
     n = len(names)
@@ -486,7 +657,7 @@ def black_litterman(
         post_mu = pi
 
     # Mean-variance optimize with the posterior returns (reuse the shared objective).
-    projection, pparams = select_projection(config.long_only, config.bounds())
+    projection, pparams, compiled = _projection(config, names)
     params = {
         "mu": post_mu,
         "cov": cov,
@@ -509,4 +680,13 @@ def black_litterman(
             "n_views": len(views) if views else 0,
             "iterations": int(info["iterations"]),
         },
+        attribution=_duals(
+            config,
+            _meanvar_objective,
+            params,
+            compiled,
+            w,
+            name="mean-variance utility (posterior)",
+            sense="maximize",
+        ),
     )

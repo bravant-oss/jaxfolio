@@ -333,3 +333,92 @@ def test_multi_period_stage_selection_beats_the_last_stage(returns):
         res.trajectory, mu, cov, w_prev, risk_aversion=_MP_GAMMA, c_lin=c_lin
     )
     assert (obj_ref - obj) / abs(obj_ref) <= _MP_RELGAP
+
+
+# --------------------------------------------------------------------------- #
+# Named constraints: the projection and its multipliers vs CVXPY
+# --------------------------------------------------------------------------- #
+# Measured worst deviations over the cases below, in float32 (the package never
+# enables x64): weights 3e-6, budget multiplier 4e-6, identified row multipliers
+# 5e-6. Unidentified rows are excluded on purpose — see the note in the test.
+_PROJ_ATOL = 5e-5
+
+
+@pytest.mark.parametrize(
+    ("long_only", "cap"),
+    [(True, 0.30), (True, 0.60), (False, 0.30)],
+    ids=["long-only-tight", "long-only-slack", "shortable"],
+)
+def test_grouped_projection_matches_cvxpy(long_only, cap):
+    """The projection and every *identified* multiplier agree with a real QP solver."""
+    cvxpy = pytest.importorskip("cvxpy")  # noqa: F841
+    import jax.numpy as jnp
+
+    from jaxfolio.constraints.structured import project_grouped_duals
+
+    rng = np.random.default_rng(0)
+    n, k = 12, 3
+    lo_s, hi_s = (0.0, 0.5) if long_only else (-0.2, 0.5)
+    lower, upper = np.full(n, lo_s), np.full(n, hi_s)
+    groups = [list(range(0, 4)), list(range(4, 8)), list(range(8, 11))]  # asset 11 ungrouped
+    gid = np.full(n, k, dtype=np.int32)
+    for j, members in enumerate(groups):
+        gid[members] = j
+    g_lower = np.zeros(k)
+    g_upper = np.full(k, cap)
+
+    for _ in range(5):
+        v = rng.normal(0.1, 0.5, n)
+        got = project_grouped_duals(
+            jnp.asarray(v),
+            jnp.asarray(lower),
+            jnp.asarray(upper),
+            jnp.asarray(1.0),
+            jnp.asarray(gid),
+            jnp.asarray(np.append(g_lower, 0.0)),
+            jnp.asarray(np.append(g_upper, 0.0)),
+        )
+        w_ref, lam_ref, theta_ref = ref.ref_grouped_projection_cvxpy(
+            v, lower, upper, 1.0, groups, g_lower, g_upper
+        )
+        w = np.asarray(got.weights)
+        assert np.allclose(w, w_ref, atol=_PROJ_ATOL), f"Δw_max={np.abs(w - w_ref).max():.4g}"
+
+        # A row's multiplier is only pinned when some member is strictly interior;
+        # otherwise any split between the row and the box bounds is a valid KKT
+        # certificate and CVXPY's interior-point method picks a different one.
+        ident = np.asarray(got.identified)[:k]
+        theta = np.asarray(got.rows)[:k]
+        if ident.any():
+            delta = np.abs(theta[ident] - theta_ref[ident]).max()
+            assert delta < _PROJ_ATOL, f"Δtheta_max={delta:.4g} on identified rows"
+        if bool(got.budget_identified):
+            assert abs(float(got.budget) - lam_ref) < _PROJ_ATOL, (
+                f"Δlam={abs(float(got.budget) - lam_ref):.4g}"
+            )
+
+
+def test_grouped_minimum_variance_matches_cvxpy(returns):
+    """A capped minimum-variance solve reaches the same optimum as a QP solver."""
+    pytest.importorskip("cvxpy")
+    from jaxfolio.constraints import GroupCap
+
+    mu, cov, mat = ref.moments(returns)
+    n = cov.shape[0]
+    names = list(returns.columns)
+    groups = [list(range(0, 3)), list(range(3, n))]
+    caps = [0.35, 0.80]
+
+    res = C.minimum_variance(
+        returns,
+        constraints=[
+            GroupCap("g0", names[:3], max=caps[0]),
+            GroupCap("g1", names[3:], max=caps[1]),
+        ],
+    )
+    w = np.asarray(res.weights)
+    w_ref, obj_ref = ref.ref_min_variance_grouped_cvxpy(cov, np.zeros(n), np.ones(n), groups, caps)
+    assert w[:3].sum() <= caps[0] + 1e-4, f"cap violated: {w[:3].sum():.5f} > {caps[0]}"
+    obj = float(w @ cov @ w)
+    assert obj <= obj_ref * (1 + 1e-3), f"jaxfolio objective {obj:.8f} vs CVXPY {obj_ref:.8f}"
+    assert np.allclose(w, w_ref, atol=2e-3), f"Δw_max={np.abs(w - w_ref).max():.4g}"

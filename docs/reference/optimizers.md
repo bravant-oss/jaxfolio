@@ -39,3 +39,31 @@ constrained classical methods.
 ::: jaxfolio.optimizers.base
     options:
       heading_level: 3
+
+## Constraints
+
+Named constraint specifications and the projections that enforce them. See the
+[constraints guide](../guide/constraints.md) for the partition requirement, the
+feasibility guarantees, and what is not expressible.
+
+::: jaxfolio.constraints.spec
+    options:
+      heading_level: 3
+
+::: jaxfolio.constraints.compile
+    options:
+      heading_level: 3
+
+::: jaxfolio.constraints.structured
+    options:
+      heading_level: 3
+
+## Attribution
+
+The explainability layer: which constraints bind, what they cost, and what the
+report will refuse to claim. See the
+[explainability guide](../guide/attribution.md).
+
+::: jaxfolio.attribution
+    options:
+      heading_level: 3

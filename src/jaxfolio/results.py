@@ -47,6 +47,7 @@ def finalize_result(
     metadata: dict | None = None,
     clean_eps: float = 1e-10,
     trajectory=None,
+    attribution=None,
 ) -> PortfolioResult:
     """Assemble a :class:`PortfolioResult` with annualized diagnostics.
 
@@ -59,6 +60,11 @@ def finalize_result(
     ``trajectory`` is an optional ``(T, n)`` planned weight path for multi-period
     optimizers. It is attached verbatim — *not* cleaned by ``clean_eps``, so the
     path keeps the solver's exact iterate while ``weights`` is tidied for display.
+
+    ``attribution`` is an optional :class:`jaxfolio.attribution.SolverDuals`. It is
+    attached verbatim and a small JSON-serializable digest of it is merged into
+    ``metadata``, so consumers that only read ``metadata`` still see the
+    convergence and binding-constraint summary.
     """
     w = np.asarray(weights, dtype=float).reshape(-1)
     w = np.where(np.abs(w) < clean_eps, 0.0, w)
@@ -77,6 +83,10 @@ def finalize_result(
     excess = ann_mu - risk_free * periods_per_year
     sharpe = excess / ann_vol if ann_vol > 0 else None
 
+    meta = dict(metadata or {})
+    if attribution is not None:
+        meta.update(attribution.summary())
+
     return PortfolioResult(
         weights=w,
         assets=list(assets),
@@ -84,6 +94,7 @@ def finalize_result(
         expected_return=ann_mu,
         volatility=ann_vol,
         sharpe=sharpe,
-        metadata=metadata or {},
+        metadata=meta,
         trajectory=trajectory,
+        attribution=attribution,
     )
