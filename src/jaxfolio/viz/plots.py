@@ -127,9 +127,21 @@ def _card_axes(
 
 
 def _stat_card(
-    fig: Figure, spec, label: str, value: str, accent: str, delta: str | None, good: bool
+    fig: Figure,
+    spec,
+    label: str,
+    value: str,
+    accent: str,
+    delta: str | None,
+    good: bool,
+    *,
+    arrow: bool = True,
 ) -> None:
-    """A KPI card: metric label, big value, accent bar, and a 'vs baseline' delta."""
+    """A KPI card: metric label, big value, accent bar, and a 'vs baseline' delta.
+
+    Set ``arrow=False`` when the footer line is a plain caption rather than a
+    comparison — a ▲/▼ on non-comparative text would falsely imply a direction.
+    """
     bb = _card_rect(fig, spec)
     fig.add_artist(
         Rectangle(
@@ -165,12 +177,15 @@ def _stat_card(
         zorder=3,
     )
     if delta:
-        arrow = "▲" if good else "▼"
-        col = theme.GOOD if good else theme.CRITICAL
+        if arrow:
+            mark = "▲ " if good else "▼ "
+            col = theme.GOOD if good else theme.CRITICAL
+        else:
+            mark, col = "", theme.INK_MUTED
         fig.text(
             bb.x0 + 0.014,
             bb.y0 + 0.026,
-            f"{arrow} {delta}",
+            f"{mark}{delta}",
             fontsize=9,
             color=col,
             ha="left",
@@ -528,6 +543,475 @@ def plot_metrics_table(metrics_df: pd.DataFrame) -> Figure:
         cell.set_text_props(color=theme.INK_SECONDARY if row > 0 else theme.INK_PRIMARY)
     ax.set_title("Backtest Metrics", pad=16, color=theme.INK_PRIMARY)
     fig.tight_layout()
+    return fig
+
+
+# --------------------------------------------------------------------------- #
+# Multi-period plots
+#
+# A multi-period result carries a whole ``(T, N)`` weight path rather than one
+# vector, so it needs its own plots: the generic weight-evolution chart assumes a
+# date index and a backtest's realized history, whereas these read a *plan* over
+# integer periods and are anchored at the holdings it started from.
+# --------------------------------------------------------------------------- #
+def _require_trajectory(result):
+    """Return ``(path, w_prev, assets)`` for a multi-period result, or explain."""
+    path = getattr(result, "trajectory", None)
+    if path is None:
+        raise ValueError(
+            f"{getattr(result, 'method', 'result')!r} has no weight path; these plots need a "
+            "multi-period result (see jaxfolio.multi_period_mean_variance)"
+        )
+    path = np.asarray(path, dtype=float)
+    w_prev = np.asarray(result.metadata.get("w_prev", np.zeros(path.shape[1])), dtype=float)
+    return path, w_prev, list(result.assets)
+
+
+def _period_axis(ax, n_periods: int, *, from_zero: bool = True) -> None:
+    """Label the x axis as integer trading periods, not dates.
+
+    When the axis starts at 0, that tick is annotated as "now" — period 0 is the
+    book the plan starts from rather than a planned holding, and labelling it in
+    place is more legible than an in-plot marker the stacked bands would cover.
+    """
+    start = 0 if from_zero else 1
+    ticks = list(range(start, n_periods + 1))
+    # Thin the ticks on a long horizon so labels stay legible.
+    step = max(1, len(ticks) // 12)
+    ticks = ticks[::step]
+    ax.set_xticks(ticks)
+    if from_zero and ticks and ticks[0] == 0:
+        ax.set_xticklabels(["0\nnow"] + [str(t) for t in ticks[1:]])
+    ax.set_xlabel("Period")
+
+
+def plot_weight_path(result, *, top_n: int | None = None) -> Figure:
+    """Stacked-area chart of a planned multi-period weight path.
+
+    Period 0 is the portfolio the plan starts from (``metadata["w_prev"]``), so the
+    chart reads as "here is what I hold, here is how it changes" rather than
+    starting mid-trade. A long-only path renders as stacked bands; if the path
+    contains short positions, stacking would be meaningless and the chart falls
+    back to one line per asset with a zero baseline.
+
+    ``top_n`` keeps only the largest holdings by peak absolute weight and folds the
+    remainder into an "Other" band, which keeps a wide universe readable.
+    """
+    path, w_prev, assets = _require_trajectory(result)
+    horizon = path.shape[0]
+
+    # Prepend the starting book so the first trade is visible as a change.
+    full = np.vstack([w_prev[None, :], path])
+    frame = pd.DataFrame(full, index=range(horizon + 1), columns=assets)
+
+    if top_n is not None and top_n < len(assets):
+        rank = frame.abs().max().sort_values(ascending=False)
+        keep = list(rank.index[:top_n])
+        other = frame.drop(columns=keep).sum(axis=1)
+        frame = frame[keep]
+        frame["Other"] = other
+
+    signed = bool((frame.to_numpy() < -1e-6).any())
+    fig, ax = _fig(10, 5.5)
+    cols = list(frame.columns)
+
+    if signed:
+        # Shorting present: a stack would misrepresent the exposures.
+        for i, c in enumerate(cols):
+            ax.plot(frame.index, frame[c].to_numpy(), color=theme.color(i), label=c, linewidth=1.8)
+        ax.axhline(0.0, color=theme.BASELINE, linewidth=1.0)
+        ax.set_ylabel("Weight (long / short)")
+    else:
+        ax.stackplot(
+            frame.index,
+            *[frame[c].to_numpy() for c in cols],
+            labels=cols,
+            colors=[theme.color(i) for i in range(len(cols))],
+            edgecolor=theme.SURFACE,
+            linewidth=0.3,
+        )
+        ax.set_ylim(0, 1)
+        ax.set_ylabel("Weight")
+
+    ax.set_title(f"{result.method} — Planned Weight Path", pad=12)
+    ax.set_xlim(0, horizon)
+    _period_axis(ax, horizon)
+    ax.legend(loc="upper right", ncol=2, fontsize=8)
+    fig.tight_layout()
+    return fig
+
+
+def plot_turnover_schedule(result, *, reference_weights=None) -> Figure:
+    """Per-period trade size for a planned path, with cumulative turnover.
+
+    This is the diagnostic that shows whether execution is actually being *spread*:
+    bars are the one-way turnover planned for each period and the line is the
+    running total. A decaying bar profile is the signature of quadratic market
+    impact; a single tall bar means the plan front-loads everything, which is the
+    correct answer when only a proportional cost is charged.
+
+    ``reference_weights`` optionally draws the turnover a *single* rebalance to
+    some external target would cost — pass the myopic (frictionless) optimum to see
+    what the plan saves. Note the plan's own terminal weights are **not** a valid
+    reference: a monotone path's total turnover equals
+    ``|w_T - w_prev|`` identically, so comparing against it would be a tautology
+    rather than a measurement.
+    """
+    _path, w_prev, _assets = _require_trajectory(result)
+    turnover = np.asarray(result.metadata["turnover_path"], dtype=float)
+    periods = np.arange(1, len(turnover) + 1)
+    total = float(np.sum(turnover))
+
+    fig, ax = _fig(10, 4.5)
+    ax.bar(
+        periods,
+        turnover,
+        color=theme.CATEGORICAL[0],
+        width=0.65,
+        label="Trade this period",
+    )
+    ax.set_ylabel("One-way turnover")
+    ax.set_title(f"{result.method} — Execution Schedule", pad=12)
+
+    cum = ax.twinx()
+    cum.plot(
+        periods,
+        np.cumsum(turnover),
+        color=theme.CATEGORICAL[3],
+        marker="o",
+        markersize=4,
+        linewidth=1.8,
+        label=f"Cumulative (total {total:.2f})",
+    )
+    cum.set_ylabel("Cumulative turnover", color=theme.INK_SECONDARY)
+    cum.grid(False)
+    cum.set_ylim(0, max(total, 1e-6) * 1.15)
+    for spine in cum.spines.values():
+        spine.set_visible(False)
+
+    if reference_weights is not None:
+        one_shot = float(np.abs(np.asarray(reference_weights, dtype=float) - w_prev).sum())
+        cum.set_ylim(0, max(total, one_shot, 1e-6) * 1.15)
+        cum.axhline(
+            one_shot,
+            color=theme.WARNING,
+            linestyle="--",
+            linewidth=1.2,
+            label=f"One-shot rebalance ({one_shot:.2f})",
+        )
+
+    handles = ax.get_legend_handles_labels()
+    extra = cum.get_legend_handles_labels()
+    ax.legend(handles[0] + extra[0], handles[1] + extra[1], loc="center right", fontsize=8)
+    _period_axis(ax, len(turnover), from_zero=False)
+    fig.tight_layout()
+    return fig
+
+
+def plot_path_convergence(result) -> Figure:
+    """Distance from each period's weights to the plan's terminal target.
+
+    Partial adjustment toward a fixed target should decay monotonically, so this is
+    the quickest way to see whether a plan is gliding smoothly, has converged early
+    (a flat tail means the horizon is longer than needed), or is still moving at the
+    final period (the horizon is too short to finish the trade).
+    """
+    path, w_prev, _ = _require_trajectory(result)
+    terminal = path[-1]
+    dist = np.concatenate(
+        [[np.abs(w_prev - terminal).sum()], np.abs(path - terminal[None, :]).sum(axis=1)]
+    )
+    periods = np.arange(0, len(dist))
+
+    fig, ax = _fig(9, 4.5)
+    ax.plot(periods, dist, color=theme.CATEGORICAL[0], marker="o", markersize=5, linewidth=2.0)
+    ax.fill_between(periods, dist, 0.0, color=theme.CATEGORICAL[0], alpha=0.18)
+    ax.set_ylabel(r"$\|w_t - w_T\|_1$")
+    ax.set_title(f"{result.method} — Convergence to Target", pad=12)
+    ax.set_xlim(0, len(dist) - 1)
+    _period_axis(ax, len(dist) - 1)
+
+    if dist[-1] > 1e-3 * max(dist[0], 1e-12):
+        ax.annotate(
+            "still trading at the horizon —\nconsider a longer horizon",
+            xy=(periods[-1], dist[-1]),
+            xytext=(-140, 34),
+            textcoords="offset points",
+            fontsize=8.5,
+            color=theme.WARNING,
+            arrowprops={"arrowstyle": "->", "color": theme.WARNING, "linewidth": 1.0},
+        )
+    fig.tight_layout()
+    return fig
+
+
+def plot_cost_comparison(results: dict) -> Figure:
+    """Compare execution schedules across cost assumptions.
+
+    ``results`` maps a label to a multi-period :class:`PortfolioResult`. Use it to
+    show the one genuinely counter-intuitive property of the model: a purely
+    proportional cost makes you trade *less* but gives no reason to trade *later*,
+    so its schedule spikes once and flatlines. Only quadratic impact spreads
+    execution across the horizon.
+    """
+    if not results:
+        raise ValueError("plot_cost_comparison needs at least one labelled result")
+
+    fig, (ax, bar) = plt.subplots(1, 2, figsize=(13, 4.5), gridspec_kw={"width_ratios": [1.7, 1.0]})
+    labels, totals, colors = [], [], []
+    for i, (name, res) in enumerate(results.items()):
+        turnover = np.asarray(res.metadata["turnover_path"], dtype=float)
+        periods = np.arange(1, len(turnover) + 1)
+        ax.plot(
+            periods,
+            turnover,
+            color=theme.color(i),
+            marker="o",
+            markersize=4,
+            linewidth=1.8,
+            label=name,
+        )
+        labels.append(name)
+        totals.append(float(res.metadata["total_turnover"]))
+        colors.append(theme.color(i))
+
+    ax.set_ylabel("One-way turnover")
+    ax.set_title("Trade size per period", pad=12)
+    ax.legend(fontsize=8, loc="upper right")
+    _period_axis(
+        ax,
+        max(len(np.asarray(r.metadata["turnover_path"])) for r in results.values()),
+        from_zero=False,
+    )
+
+    bar.barh(range(len(labels)), totals, color=colors, height=0.6)
+    bar.set_yticks(range(len(labels)))
+    bar.set_yticklabels(labels, fontsize=8)
+    bar.invert_yaxis()
+    bar.set_xlabel("Total turnover")
+    bar.set_title("Total traded", pad=12)
+
+    fig.suptitle("Execution schedule by cost assumption", fontsize=13, fontweight="bold")
+    fig.tight_layout()
+    return fig
+
+
+def multiperiod_dashboard(
+    result, *, comparison: dict | None = None, reference_weights=None
+) -> Figure:
+    """Composite one-page report for a planned multi-period trajectory.
+
+    A KPI strip (horizon, total turnover, cost of the plan, smoothing bias), the
+    weight path, the execution schedule, and convergence to the target — with an
+    optional cost-regime comparison panel when ``comparison`` maps labels to other
+    multi-period results.
+
+    ``reference_weights`` optionally supplies an external one-shot target (the
+    myopic optimum is the natural choice) so the turnover KPI can report what the
+    plan saves. Without it that card shows how the trade was spread instead, since
+    the path's own terminal weights would make the comparison a tautology.
+    """
+    path, w_prev, assets = _require_trajectory(result)
+    meta = result.metadata
+    horizon = path.shape[0]
+    turnover = np.asarray(meta["turnover_path"], dtype=float)
+
+    rows = 4 if comparison else 3
+    heights = [0.30, 0.60, 1.0, 1.0] if comparison else [0.30, 0.60, 1.0]
+    fig = plt.figure(figsize=(16, 4.2 + 3.1 * (rows - 1)))
+    fig.patch.set_facecolor(theme.PLANE)
+    gs = fig.add_gridspec(
+        rows,
+        4,
+        height_ratios=heights,
+        hspace=0.42,
+        wspace=0.16,
+        left=0.028,
+        right=0.985,
+        top=0.965,
+        bottom=0.055,
+    )
+
+    # --- Header -------------------------------------------------------------- #
+    hb = _card_rect(fig, gs[0, :])
+    fig.text(
+        hb.x0 + 0.016,
+        hb.y0 + hb.height * 0.62,
+        "Multi-Period Execution Plan",
+        fontsize=20,
+        fontweight="bold",
+        color=theme.INK_PRIMARY,
+        ha="left",
+        va="center",
+        zorder=3,
+    )
+    active = "costs priced in the objective" if meta.get("costs_active") else "frictionless"
+    fig.text(
+        hb.x0 + 0.016,
+        hb.y0 + hb.height * 0.26,
+        f"{result.method} · {horizon} periods · {len(assets)} assets · {active}",
+        fontsize=10.5,
+        color=theme.INK_MUTED,
+        ha="left",
+        va="center",
+        zorder=3,
+    )
+    sharpe = meta.get("terminal_sharpe")
+    fig.text(
+        hb.x1 - 0.016,
+        hb.y0 + hb.height * 0.5,
+        f"terminal Sharpe {sharpe:.2f}" if sharpe is not None else "terminal Sharpe n/a",
+        fontsize=11,
+        color=theme.INK_SECONDARY,
+        ha="right",
+        va="center",
+        zorder=3,
+    )
+
+    # --- KPI strip ----------------------------------------------------------- #
+    total_turnover = float(meta["total_turnover"])
+    _stat_card(
+        fig,
+        gs[1, 0],
+        "Horizon",
+        f"{horizon}",
+        theme.CATEGORICAL[0],
+        f"{len(assets)} assets",
+        True,
+        arrow=False,
+    )
+    if reference_weights is not None:
+        one_shot = float(np.abs(np.asarray(reference_weights, dtype=float) - w_prev).sum())
+        saved = one_shot - total_turnover
+        _stat_card(
+            fig,
+            gs[1, 1],
+            "Total turnover",
+            f"{total_turnover:.2f}",
+            theme.CATEGORICAL[4],
+            f"{abs(saved):.2f} vs one-shot",
+            saved >= 0,
+        )
+    else:
+        trading = int((turnover > 1e-4).sum())
+        _stat_card(
+            fig,
+            gs[1, 1],
+            "Total turnover",
+            f"{total_turnover:.2f}",
+            theme.CATEGORICAL[4],
+            f"spread over {trading} of {horizon} periods",
+            True,
+            arrow=False,
+        )
+    _stat_card(
+        fig,
+        gs[1, 2],
+        "Cost of plan",
+        f"{meta['total_cost'] * 1e4:.1f} bps",
+        theme.CATEGORICAL[3],
+        "of traded notional",
+        True,
+        arrow=False,
+    )
+    exact = abs(float(meta.get("objective_exact") or 0.0))
+    _stat_card(
+        fig,
+        gs[1, 3],
+        "Smoothing bias",
+        f"{meta['smoothing_bias']:.1e}",
+        theme.CATEGORICAL[1],
+        f"{meta['smoothing_bias'] / exact:.0e} of objective" if exact > 0 else "L1 surrogate error",
+        True,
+        arrow=False,
+    )
+
+    # --- Weight path --------------------------------------------------------- #
+    ax = _card_axes(
+        fig,
+        gs[2, :2],
+        title="Planned weight path",
+        subtitle="period 0 is the book the plan starts from",
+    )
+    full = np.vstack([w_prev[None, :], path])
+    signed = bool((full < -1e-6).any())
+    if signed:
+        for i in range(len(assets)):
+            ax.plot(range(horizon + 1), full[:, i], color=theme.color(i), linewidth=1.5)
+        ax.axhline(0.0, color=theme.BASELINE, linewidth=1.0)
+    else:
+        ax.stackplot(
+            range(horizon + 1),
+            *[full[:, i] for i in range(len(assets))],
+            colors=[theme.color(i) for i in range(len(assets))],
+            edgecolor=theme.SURFACE,
+            linewidth=0.3,
+        )
+        ax.set_ylim(0, 1)
+    ax.set_xlim(0, horizon)
+    ax.set_ylabel("Weight")
+    _period_axis(ax, horizon)
+
+    # --- Execution schedule -------------------------------------------------- #
+    legend = [("planned trade", theme.CATEGORICAL[0])]
+    if reference_weights is not None:
+        legend.append(("one-shot rebalance", theme.WARNING))
+    ax2 = _card_axes(
+        fig,
+        gs[2, 2:],
+        title="Execution schedule",
+        subtitle="decaying bars = impact spreading the trade",
+        legend=legend,
+    )
+    ax2.bar(np.arange(1, horizon + 1), turnover, color=theme.CATEGORICAL[0], width=0.65)
+    if reference_weights is not None:
+        ax2.axhline(
+            float(np.abs(np.asarray(reference_weights, dtype=float) - w_prev).sum()),
+            color=theme.WARNING,
+            linestyle="--",
+            linewidth=1.2,
+        )
+    ax2.set_xlim(0.4, horizon + 0.6)
+    ax2.set_ylabel("One-way turnover")
+    _period_axis(ax2, horizon, from_zero=False)
+
+    # --- Optional comparison ------------------------------------------------- #
+    if comparison:
+        ax3 = _card_axes(
+            fig,
+            gs[3, :2],
+            title="Convergence to target",
+            subtitle="partial adjustment should decay monotonically",
+        )
+        dist = np.concatenate(
+            [[np.abs(w_prev - path[-1]).sum()], np.abs(path - path[-1][None, :]).sum(axis=1)]
+        )
+        ax3.plot(range(len(dist)), dist, color=theme.CATEGORICAL[0], marker="o", markersize=4)
+        ax3.fill_between(range(len(dist)), dist, 0.0, color=theme.CATEGORICAL[0], alpha=0.18)
+        ax3.set_ylabel(r"$\|w_t - w_T\|_1$")
+        _period_axis(ax3, len(dist) - 1)
+
+        ax4 = _card_axes(
+            fig,
+            gs[3, 2:],
+            title="Cost assumptions compared",
+            subtitle="proportional cost spikes once; impact spreads",
+        )
+        for i, (name, res) in enumerate(comparison.items()):
+            t = np.asarray(res.metadata["turnover_path"], dtype=float)
+            ax4.plot(
+                np.arange(1, len(t) + 1),
+                t,
+                color=theme.color(i),
+                marker="o",
+                markersize=3.5,
+                linewidth=1.6,
+                label=name,
+            )
+        ax4.set_ylabel("One-way turnover")
+        ax4.legend(fontsize=7.5, loc="upper right")
+        _period_axis(ax4, horizon, from_zero=False)
+
     return fig
 
 

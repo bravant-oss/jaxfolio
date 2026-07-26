@@ -99,18 +99,55 @@ def _proj_box_aux(z: Array, pparams) -> Array:
     return jnp.concatenate([project_box_budget(z[:-1], lo, hi, budget), z[-1:]])
 
 
-def select_projection(long_only: bool, weight_bounds: tuple[float, float], *, aux: bool = False):
+def _proj_simplex_path(W: Array, pparams) -> Array:
+    """Project each *row* of a ``(T, N)`` weight path onto the simplex.
+
+    The multi-period feasible set is the Cartesian product of the per-period
+    sets, and the projection onto a product is the product of the projections —
+    hence a plain row-wise ``vmap``. ``project_simplex``'s internal
+    ``v.shape[0]`` is the *post-vmap* row length ``N``, which stays static, so no
+    shape information has to travel in ``pparams``.
+    """
+    (budget,) = pparams
+    return jax.vmap(project_simplex, in_axes=(0, None))(W, budget)
+
+
+def _proj_box_path(W: Array, pparams) -> Array:
+    """Row-wise box+budget projection for a ``(T, N)`` weight path."""
+    lo, hi, budget = pparams
+    return jax.vmap(project_box_budget, in_axes=(0, None, None, None))(W, lo, hi, budget)
+
+
+def select_projection(
+    long_only: bool,
+    weight_bounds: tuple[float, float],
+    *,
+    aux: bool = False,
+    path: bool = False,
+):
     """Return ``(projection_fn, pparams)`` for the cached kernel.
 
     ``aux=True`` selects the variant that projects only the weight-block of a
-    packed ``[w, tau]`` vector (used by the CVaR optimizer). ``pparams`` is a
-    tuple of Python floats — passed as a traced argument to the kernel.
+    packed ``[w, tau]`` vector (used by the CVaR optimizer). ``path=True``
+    selects the row-wise variant for a ``(T, N)`` weight path (used by the
+    multi-period optimizer). ``pparams`` is a tuple of Python floats — passed as
+    a traced argument to the kernel, and identical for all three variants.
     """
+    if aux and path:
+        raise ValueError(
+            "select_projection: aux and path are mutually exclusive — aux packs a "
+            "scalar tail onto a 1-D vector, path batches rows of a 2-D weight path"
+        )
     lo, hi = weight_bounds
     simplex = long_only and lo <= 0.0 and hi >= 1.0
     if simplex:
+        if path:
+            return _proj_simplex_path, (1.0,)
         return (_proj_simplex_aux if aux else _proj_simplex), (1.0,)
-    return (_proj_box_aux if aux else _proj_box), (float(lo), float(hi), 1.0)
+    bounds = (float(lo), float(hi), 1.0)
+    if path:
+        return _proj_box_path, bounds
+    return (_proj_box_aux if aux else _proj_box), bounds
 
 
 # --------------------------------------------------------------------------- #
@@ -149,7 +186,18 @@ def _spg_loop(
     tol: Array,
     max_iter: int,
 ) -> tuple[Array, Array, Array]:
-    """Spectral projected gradient (Barzilai-Borwein). Returns ``(w, iters, pgnorm)``."""
+    """Spectral projected gradient (Barzilai-Borwein). Returns ``(w, iters, pgnorm)``.
+
+    The loop is *rank-agnostic*: the variable may be a 1-D weight vector or an
+    ``(T, N)`` weight path. Inner products are taken on the flattened variable and
+    ``jnp.linalg.norm`` is the Frobenius (= flattened Euclidean) norm, so both
+    the Barzilai-Borwein step and the stopping test read the same on either
+    shape. ``jnp.vdot(x.ravel(), y.ravel())`` is used rather than
+    ``jnp.sum(x * y)`` because it lowers to the same ``dot_general`` the previous
+    ``jnp.dot(x, y)`` did and is therefore bit-for-bit identical for 1-D inputs;
+    the multiply-then-reduce spelling differs in the last bits at small ``n`` and
+    would perturb existing solutions.
+    """
     grad_f = jax.grad(f)
 
     def pgnorm(w: Array, g: Array) -> Array:
@@ -170,8 +218,8 @@ def _spg_loop(
         g_new = grad_f(w_new)
         s = w_new - w
         y = g_new - g
-        sy = jnp.dot(s, y)
-        ss = jnp.dot(s, s)
+        sy = jnp.vdot(s.ravel(), y.ravel())
+        ss = jnp.vdot(s.ravel(), s.ravel())
         # BB1 step; hold the previous step when curvature is non-positive.
         alpha_new = jnp.where(sy > 1e-18, jnp.clip(ss / sy, _ALPHA_MIN, _ALPHA_MAX), alpha)
         return (i + 1, w_new, g_new, alpha_new, pgnorm(w_new, g_new))
@@ -222,8 +270,14 @@ def _run_solver(
     max_iter: int,
     tol,
     solver_options: Mapping[str, Any] | None = None,
-) -> tuple[Array, Array]:
-    """Dispatch to the requested solver. Returns ``(weights, iterations)``."""
+) -> tuple[Array, Array, Array]:
+    """Dispatch to the requested solver. Returns ``(weights, iterations, residual)``.
+
+    ``residual`` is the solver's own convergence measure — the projected-gradient
+    (KKT stationarity) norm for ``"spg"``, the weight-update norm for the optax
+    loops — so callers can report whether ``tol`` was actually reached rather
+    than only how many iterations were spent.
+    """
     tol = jnp.asarray(tol)
     spec = resolve_solver(solver, solver_options)  # idempotent on a SolverSpec
     if spec.kind == "spg":
@@ -232,11 +286,9 @@ def _run_solver(
         else:
             lipschitz = _estimate_lipschitz(f, projection(w0))
             alpha0 = jnp.clip(1.0 / (lipschitz + 1e-12), 1e-8, 1e6)
-        w, iters, _ = _spg_loop(f, projection, w0, alpha0, tol, max_iter)
-        return w, iters
+        return _spg_loop(f, projection, w0, alpha0, tol, max_iter)
     optimizer = build_optimizer(spec, learning_rate)
-    w, iters, _ = _optax_loop(f, projection, w0, optimizer, tol, max_iter)
-    return w, iters
+    return _optax_loop(f, projection, w0, optimizer, tol, max_iter)
 
 
 # --------------------------------------------------------------------------- #
@@ -299,9 +351,10 @@ def solve_constrained(
     :mod:`jaxfolio.optimizers.classical`) so the underlying jit cache hits.
     ``solver`` is ``"spg"``, any optax optimizer name or factory, or a
     pre-resolved :class:`~jaxfolio.solvers.SolverSpec`.
-    Returns ``(weights, info)`` with ``info["iterations"]``.
+    Returns ``(weights, info)`` with ``info["iterations"]`` and
+    ``info["residual"]`` (the solver's convergence measure at the final iterate).
     """
-    w, iters = _solve_cached(
+    w, iters, resid = _solve_cached(
         objective,
         projection,
         obj_params,
@@ -312,7 +365,7 @@ def solve_constrained(
         learning_rate=learning_rate,
         max_iter=max_iter,
     )
-    return w, {"iterations": iters}
+    return w, {"iterations": iters, "residual": resid}
 
 
 def solve_projected_gradient(
@@ -334,9 +387,10 @@ def solve_projected_gradient(
     each time — for hot loops over a built-in optimizer, prefer the cached
     :func:`solve_constrained`. ``solver`` is ``"spg"``, any optax optimizer name
     or factory, or a pre-resolved :class:`~jaxfolio.solvers.SolverSpec`.
-    Returns ``(weights, info)``.
+    Returns ``(weights, info)`` with ``info["iterations"]`` and
+    ``info["residual"]``.
     """
-    w, iters = _run_solver(
+    w, iters, resid = _run_solver(
         objective,
         projection,
         w0,
@@ -346,7 +400,7 @@ def solve_projected_gradient(
         tol=tol,
         solver_options=solver_options,
     )
-    return w, {"iterations": iters}
+    return w, {"iterations": iters, "residual": resid}
 
 
 # --------------------------------------------------------------------------- #

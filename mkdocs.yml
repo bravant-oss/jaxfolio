@@ -125,6 +125,7 @@ nav:
       - Core concepts: getting-started/concepts.md
   - User guide:
       - Optimizers: guide/optimizers.md
+      - Multi-period: guide/multiperiod.md
       - Backtesting: guide/backtesting.md
       - Options: guide/options.md
       - LLM strategies: guide/llm.md

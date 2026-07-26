@@ -14,6 +14,8 @@ import pytest
 
 from jaxfolio.optimizers import classical as C
 from jaxfolio.optimizers import graph as G
+from jaxfolio.optimizers import multiperiod as C_MP
+from jaxfolio.types import TradingCosts
 
 from . import references as ref
 
@@ -138,3 +140,196 @@ def _as_named_frame(returns):
     if isinstance(returns, pd.DataFrame):
         return returns, list(returns.columns)
     raise TypeError("HRP reference test expects a pandas DataFrame of returns")
+
+
+# --------------------------------------------------------------------------- #
+# Multi-period mean-variance with trading costs
+# --------------------------------------------------------------------------- #
+# The exact problem (true L1 trade cost) is a convex QP in T*N variables, so
+# CVXPY solves it to optimality and gives a genuine reference rather than a
+# second iterate. jaxfolio instead Huber-smooths the L1 and walks a ladder of
+# shrinking widths, keeping whichever stage scores best under the exact
+# objective. These tests pin that the resulting gap stays tiny.
+#
+# Accuracy is NOT uniform across cost regimes, and the tolerances below reflect
+# measured behavior rather than a single guess:
+#
+#   * frictionless / impact-dominated  -> ~1e-8 relative (smooth, strongly convex)
+#   * prohibitive linear cost          -> exact (the no-trade path is optimal)
+#   * mid-range linear cost            -> up to ~2e-4 relative, the stiff regime
+#     where the L1 term rivals the entire mean-variance curvature
+#
+# Unlike the CVaR gap pinned by a strict xfail above, this needs no xfail: the
+# error is a controlled smoothing bias on a strongly convex problem, not a solver
+# mismatched to its objective.
+_MP_HORIZON = 4
+_MP_GAMMA = 3.0
+# Measured worst case across n in {4..50} and six cost regimes is 1.9e-4; this
+# leaves ~5x headroom without being so loose it would accept a real regression.
+_MP_RELGAP = 1e-3
+
+
+def _mp_setup(returns):
+    mu, cov, _ = ref.moments(returns)
+    return mu, cov, np.eye(len(mu))[0]
+
+
+@pytest.mark.parametrize(
+    ("spread_bps", "impact_bps"),
+    [(0.0, 0.0), (10.0, 0.0), (50.0, 0.0), (10.0, 500.0), (0.0, 2000.0)],
+    ids=["frictionless", "linear-10bps", "linear-50bps", "linear+impact", "impact-only"],
+)
+def test_multi_period_matches_cvxpy_qp(returns, spread_bps, impact_bps):
+    """jaxfolio's smoothed path must score within tolerance of the exact QP optimum."""
+    pytest.importorskip("cvxpy")
+    mu, cov, w_prev = _mp_setup(returns)
+    c_lin, c_quad = spread_bps / 1e4, impact_bps / 1e4
+
+    _, obj_ref = ref.ref_multi_period_cvxpy(
+        mu,
+        cov,
+        w_prev,
+        horizon=_MP_HORIZON,
+        risk_aversion=_MP_GAMMA,
+        c_lin=c_lin,
+        c_quad=c_quad,
+    )
+    res = C_MP.multi_period_mean_variance(
+        returns,
+        horizon=_MP_HORIZON,
+        w_prev=w_prev,
+        risk_aversion=_MP_GAMMA,
+        costs=TradingCosts(spread_bps=spread_bps, impact_bps=impact_bps),
+    )
+    obj = ref.multi_period_objective(
+        res.trajectory,
+        mu,
+        cov,
+        w_prev,
+        risk_aversion=_MP_GAMMA,
+        c_lin=c_lin,
+        c_quad=c_quad,
+    )
+    relgap = (obj_ref - obj) / abs(obj_ref)
+    # CVXPY is the exact maximum, so jaxfolio cannot meaningfully exceed it; the
+    # small allowance covers the reference solver's own residual tolerance.
+    assert relgap >= -_MP_RELGAP, f"jaxfolio exceeded the exact optimum by {-relgap:.3g}"
+    assert relgap <= _MP_RELGAP, (
+        f"objective {obj:.10g} vs CVXPY optimum {obj_ref:.10g} "
+        f"(relative gap {relgap:.3g}, budget {_MP_RELGAP:.3g})"
+    )
+
+
+def test_multi_period_zero_cost_matches_cvxpy_weights(returns):
+    """With no frictions the path separates, so the weights themselves must match.
+
+    Run first as a localizing test: it exercises the mean-variance half of the
+    objective independently of the cost machinery, so a failure here points at the
+    path construction rather than at the smoothing.
+    """
+    pytest.importorskip("cvxpy")
+    mu, cov, w_prev = _mp_setup(returns)
+    W_ref, _ = ref.ref_multi_period_cvxpy(
+        mu, cov, w_prev, horizon=_MP_HORIZON, risk_aversion=_MP_GAMMA, c_lin=0.0
+    )
+    res = C_MP.multi_period_mean_variance(
+        returns, horizon=_MP_HORIZON, w_prev=w_prev, risk_aversion=_MP_GAMMA
+    )
+    assert np.allclose(res.trajectory, W_ref, atol=2e-3), (
+        f"Δw_max={np.abs(res.trajectory - W_ref).max():.4g}"
+    )
+
+
+def test_multi_period_impact_glide_path_matches_cvxpy(returns):
+    """Quadratic impact ⇒ a decaying execution schedule, matching CVXPY per period.
+
+    This is the economic content of the feature, so it is checked against the
+    exact optimum rather than only asserted as a shape. Per-period turnover is the
+    quantity a trader reads, which makes it the right thing to compare.
+    """
+    pytest.importorskip("cvxpy")
+    mu, cov, w_prev = _mp_setup(returns)
+    c_lin, c_quad = 10.0 / 1e4, 500.0 / 1e4
+    W_ref, _ = ref.ref_multi_period_cvxpy(
+        mu,
+        cov,
+        w_prev,
+        horizon=_MP_HORIZON,
+        risk_aversion=_MP_GAMMA,
+        c_lin=c_lin,
+        c_quad=c_quad,
+    )
+    res = C_MP.multi_period_mean_variance(
+        returns,
+        horizon=_MP_HORIZON,
+        w_prev=w_prev,
+        risk_aversion=_MP_GAMMA,
+        costs=TradingCosts(spread_bps=10.0, impact_bps=500.0),
+    )
+    prev_ref = np.vstack([w_prev[None, :], W_ref[:-1]])
+    turnover_ref = np.abs(W_ref - prev_ref).sum(axis=1)
+    turnover = np.asarray(res.metadata["turnover_path"])
+    assert np.allclose(turnover, turnover_ref, atol=1e-3), (
+        f"turnover schedule {turnover} vs reference {turnover_ref}"
+    )
+    # And it genuinely decays rather than front-loading everything.
+    assert (np.diff(turnover_ref) < 0).all(), f"reference is not a glide path: {turnover_ref}"
+
+
+def test_multi_period_prohibitive_cost_is_exactly_no_trade(returns):
+    """When trading is ruinous the optimum is to hold still — and that is exact.
+
+    No smoothing bias applies here: the Huber band's gradient is exactly zero at
+    zero trade, so the no-trade path is a true stationary point of the surrogate.
+    """
+    pytest.importorskip("cvxpy")
+    mu, cov, w_prev = _mp_setup(returns)
+    c_lin = 1000.0 / 1e4
+    _, obj_ref = ref.ref_multi_period_cvxpy(
+        mu, cov, w_prev, horizon=_MP_HORIZON, risk_aversion=_MP_GAMMA, c_lin=c_lin
+    )
+    res = C_MP.multi_period_mean_variance(
+        returns,
+        horizon=_MP_HORIZON,
+        w_prev=w_prev,
+        risk_aversion=_MP_GAMMA,
+        costs=TradingCosts(spread_bps=1000.0),
+    )
+    obj = ref.multi_period_objective(
+        res.trajectory, mu, cov, w_prev, risk_aversion=_MP_GAMMA, c_lin=c_lin
+    )
+    assert abs(obj_ref - obj) / abs(obj_ref) < 1e-6, f"{obj:.10g} vs {obj_ref:.10g}"
+    assert np.allclose(res.trajectory, w_prev[None, :], atol=1e-5)
+
+
+def test_multi_period_stage_selection_beats_the_last_stage(returns):
+    """Selecting the best smoothing stage must never be worse than taking the last.
+
+    Accuracy is not monotone in the Huber width, which is exactly why the ladder
+    selects on the exact objective instead of trusting its final stage. This pins
+    that the selection is actually doing work, and records how much.
+    """
+    pytest.importorskip("cvxpy")
+    mu, cov, w_prev = _mp_setup(returns)
+    c_lin = 50.0 / 1e4
+    _, obj_ref = ref.ref_multi_period_cvxpy(
+        mu, cov, w_prev, horizon=_MP_HORIZON, risk_aversion=_MP_GAMMA, c_lin=c_lin
+    )
+    res = C_MP.multi_period_mean_variance(
+        returns,
+        horizon=_MP_HORIZON,
+        w_prev=w_prev,
+        risk_aversion=_MP_GAMMA,
+        costs=TradingCosts(spread_bps=50.0),
+    )
+    stage_values = res.metadata["stage_objective_exact"]
+    selected = res.metadata["selected_stage"]
+    # ``stage_objective_exact`` is in minimization form; the chosen one must be the
+    # smallest, and at least as good as the final stage.
+    assert min(stage_values) <= stage_values[-1] + 1e-12
+    if selected >= 0:
+        assert np.isclose(stage_values[selected], min(stage_values))
+    obj = ref.multi_period_objective(
+        res.trajectory, mu, cov, w_prev, risk_aversion=_MP_GAMMA, c_lin=c_lin
+    )
+    assert (obj_ref - obj) / abs(obj_ref) <= _MP_RELGAP

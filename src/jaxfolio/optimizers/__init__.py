@@ -1,4 +1,4 @@
-"""Portfolio optimizers: classical, learning-based, and graph-based."""
+"""Portfolio optimizers: classical, multi-period, learning-based, and graph-based."""
 
 from jaxfolio.optimizers.classical import (
     black_litterman,
@@ -18,6 +18,7 @@ from jaxfolio.optimizers.graph import (
     mst_centrality,
 )
 from jaxfolio.optimizers.learning import deep_sharpe, online_gradient
+from jaxfolio.optimizers.multiperiod import multi_period_mean_variance, solve_weight_path
 
 __all__ = [
     # classical
@@ -31,6 +32,9 @@ __all__ = [
     "kelly",
     "min_cvar",
     "black_litterman",
+    # multi-period
+    "multi_period_mean_variance",
+    "solve_weight_path",
     # learning
     "deep_sharpe",
     "online_gradient",

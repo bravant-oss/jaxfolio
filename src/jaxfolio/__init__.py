@@ -44,6 +44,7 @@ from jaxfolio.optimizers import (
     min_cvar,
     minimum_variance,
     mst_centrality,
+    multi_period_mean_variance,
     online_gradient,
     risk_parity,
 )
@@ -56,7 +57,7 @@ from jaxfolio.registry import (
     unregister,
 )
 from jaxfolio.solvers import available_solvers
-from jaxfolio.types import OptimizerConfig, PortfolioResult
+from jaxfolio.types import OptimizerConfig, PortfolioResult, TradingCosts
 
 # Register the built-in optimizers so they show up in the strategy registry
 # alongside any user-defined strategies.
@@ -69,6 +70,7 @@ __all__ = [
     # types
     "PortfolioResult",
     "OptimizerConfig",
+    "TradingCosts",
     "available_solvers",
     # registry & custom strategies
     "register_strategy",
@@ -98,6 +100,8 @@ __all__ = [
     "kelly",
     "min_cvar",
     "black_litterman",
+    # multi-period optimizers
+    "multi_period_mean_variance",
     # learning optimizers
     "deep_sharpe",
     "online_gradient",

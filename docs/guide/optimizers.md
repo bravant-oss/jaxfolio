@@ -4,7 +4,7 @@ Every optimizer shares the interface `method(returns, ...) → PortfolioResult`
 and — for the constrained classical methods — the same
 [projected-gradient solver](../getting-started/concepts.md#the-shared-solver).
 This guide states each method's objective, its parameters, and the diagnostics it
-records, grouped into four families.
+records, grouped into five families.
 
 Throughout, \(w \in \mathbb{R}^N\) is the weight vector, \(\mu\) the vector of
 expected (per-period) returns, and \(\Sigma\) the return covariance matrix. Unless
@@ -16,6 +16,7 @@ configurable through [`OptimizerConfig`](../reference/types.md#jaxfolio.types.Op
     |---|---|
     | Baselines | `equal_weight`, `inverse_volatility` |
     | Classical (solver) | `minimum_variance`, `mean_variance`, `maximum_sharpe`, `maximum_diversification`, `risk_parity`, `kelly`, `min_cvar`, `black_litterman` |
+    | Multi-period | `multi_period_mean_variance` |
     | Learning | `deep_sharpe`, `online_gradient` |
     | Graph | `hierarchical_risk_parity`, `hierarchical_equal_risk`, `mst_centrality` |
 
@@ -236,6 +237,46 @@ result.metadata["posterior_returns"]
 !!! tip "LLM-generated views"
     `black_litterman` is the engine behind the [LLM strategies](llm.md): a local
     model produces the `views` and a dispersion-calibrated `view_confidence`.
+
+---
+
+## Multi-period
+
+Every method above is *single-period*: it answers "what should I hold?" while
+knowing nothing about what you hold today, so transaction costs can only be
+subtracted afterwards. The multi-period optimizer answers the different and more
+actionable question — "what should I **do** today?" — by solving for the entire
+weight path at once with costs priced inside the objective.
+
+### `multi_period_mean_variance`
+
+Optimizes over a path \(W = (w_1, \dots, w_T)\) anchored at your current holdings
+\(w_0 = w_{\text{prev}}\):
+
+$$
+\min_{W} \sum_{t=1}^{T} \left[ -w_t^\top \mu_t + \tfrac{\gamma}{2} w_t^\top \Sigma_t w_t
++ c_{\text{lin}}^\top |w_t - w_{t-1}| + c_{\text{quad}}^\top (w_t - w_{t-1})^2 \right]
+$$
+
+subject to each period's weights independently satisfying the configured budget
+and bounds. `result.weights` is the **first** row — what to trade into now — and
+`result.trajectory` is the full \((T, N)\) plan.
+
+```python
+res = jf.multi_period_mean_variance(
+    returns,
+    horizon=5,
+    w_prev=current_holdings,
+    costs=jf.TradingCosts(spread_bps=10.0, impact_bps=500.0),
+)
+res.weights                              # hold this today
+res.trajectory                           # the whole (5, N) glide path
+res.metadata["turnover_path"]            # planned trade per period
+res.metadata["terminal_weights"]         # the long-run target
+```
+
+See the [multi-period guide](multiperiod.md) for the cost model, why quadratic
+impact is what actually produces a glide path, and the soft-turnover caveat.
 
 ---
 

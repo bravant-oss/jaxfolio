@@ -10,6 +10,15 @@ use each.
     options:
       heading_level: 3
 
+## Multi-period
+
+Path-aware, cost-aware optimization over a horizon. See the
+[multi-period guide](../guide/multiperiod.md) for the cost model and its limits.
+
+::: jaxfolio.optimizers.multiperiod
+    options:
+      heading_level: 3
+
 ## Learning-based
 
 ::: jaxfolio.optimizers.learning

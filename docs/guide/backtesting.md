@@ -21,6 +21,18 @@ At each step \(t\) beyond the initial `lookback`:
 This avoids look-ahead bias — the optimizer only ever sees data strictly before
 the period it is allocating for.
 
+Two optional steps engage for cost-aware strategies, and are inert for every
+optimizer that does not use them:
+
+* **Holdings injection.** An optimizer declaring a `w_prev` keyword is handed the
+  current portfolio at each rebalance, so it can price the trade it is about to
+  recommend. Note that vector does *not* necessarily sum to one — it is the
+  all-zero flat book before the first rebalance, and drifted thereafter.
+* **Trajectory execution.** If the optimizer returns a `trajectory`, its planned
+  path is executed step by step over the following periods, paying cost on each
+  step, rather than having every row but the first discarded. Pass
+  `follow_trajectory=False` to trade only row 0 and then drift.
+
 ## Single backtest
 
 ```python
@@ -109,7 +121,8 @@ bundles the headline set that the backtester attaches to each result.
 | `var_95` | Historical Value-at-Risk at 95% (a positive loss) |
 | `cvar_95` | Historical expected shortfall at 95% |
 | `hit_rate` | Fraction of periods with a positive return |
-| `avg_turnover` | Mean one-way turnover per rebalance |
+| `avg_turnover` | Mean one-way turnover per *trading* period (rebalances, plus path steps when following a trajectory) |
+| `total_cost` | Total transaction cost paid over the run |
 
 Each is also callable directly on any return series:
 
@@ -137,3 +150,38 @@ viz.save(viz.dashboard(results, returns), "dashboard.png")
 </figure>
 
 See the [Visualization guide](visualization.md) for the full plot catalog.
+
+## Cost-aware, path-aware strategies
+
+[`multi_period_mean_variance`](multiperiod.md) both accepts `w_prev` and returns a
+`trajectory`, so it uses each of the optional steps above. Comparing it against its
+myopic counterpart under a punitive cost is the natural experiment:
+
+```python
+from functools import partial
+
+results = compare(
+    returns,
+    {
+        "myopic": partial(jf.mean_variance, risk_aversion=3.0),
+        "multi-period": partial(
+            jf.multi_period_mean_variance,
+            horizon=5, risk_aversion=3.0,
+            costs=jf.TradingCosts(spread_bps=50.0, impact_bps=500.0),
+        ),
+    },
+    lookback=252, rebalance_every=21, transaction_cost=0.005,
+)
+metrics_table(results)[["annual_return", "sharpe", "avg_turnover", "total_cost"]]
+```
+
+!!! warning "A `lambda` hides the `w_prev` parameter"
+    Holdings detection reads the optimizer's signature, and
+    `lambda w: opt(w, w_prev=...)` has the signature `(w)`. Such a wrapper falls
+    back to legacy behavior silently — the safe direction, but not what you
+    intended. Use `functools.partial`, pass the function directly, or force it with
+    `holdings_aware=True` (which raises loudly if the optimizer cannot accept it).
+
+Realized turnover here will not match the optimizer's planned
+`metadata["turnover_path"]`: the plan assumes no drift, whereas the engine drifts
+weights with returns and then trades from the drifted book.

@@ -71,6 +71,7 @@ class PortfolioResult:
     volatility: float | None       # annualized
     sharpe: float | None           # annualized
     metadata: dict                 # free-form diagnostics
+    trajectory: np.ndarray | None  # (T, n) weight path; multi-period only
 ```
 
 Useful helpers:

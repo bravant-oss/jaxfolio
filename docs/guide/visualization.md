@@ -64,6 +64,48 @@ viz.save(viz.plot_equity_curves(results), "equity.png")
 viz.save(viz.plot_drawdown(results), "drawdown.png")
 ```
 
+## Multi-period plots
+
+A [multi-period result](multiperiod.md) carries a whole `(T, N)` weight *plan*
+rather than one vector, so it gets its own plots: these label integer periods
+instead of dates and anchor period 0 at the book the plan starts from. They raise
+a clear `ValueError` on a single-period result.
+
+| Function | Shows |
+|---|---|
+| [`plot_weight_path`](../reference/viz.md#jaxfolio.viz.plots.plot_weight_path) | the planned trajectory as stacked bands (lines when it shorts), starting from current holdings |
+| [`plot_turnover_schedule`](../reference/viz.md#jaxfolio.viz.plots.plot_turnover_schedule) | trade size per period plus cumulative turnover — the diagnostic for whether execution is actually spread |
+| [`plot_path_convergence`](../reference/viz.md#jaxfolio.viz.plots.plot_path_convergence) | distance to the terminal target per period; flags a horizon that is too short |
+| [`plot_cost_comparison`](../reference/viz.md#jaxfolio.viz.plots.plot_cost_comparison) | execution schedules across cost assumptions, side by side |
+| [`multiperiod_dashboard`](../reference/viz.md#jaxfolio.viz.plots.multiperiod_dashboard) | one-page report: KPI strip, path, schedule, convergence, cost regimes |
+
+```python
+res = jf.multi_period_mean_variance(
+    returns, horizon=10, w_prev=holdings,
+    costs=jf.TradingCosts(spread_bps=10.0, impact_bps=100.0),
+)
+viz.save(viz.plot_weight_path(res), "glidepath.png")
+
+# Pass an external target so the "one-shot" reference measures something: the
+# plan's own terminal weights would be a tautology, since a monotone path's total
+# turnover equals |w_T - w_prev| identically.
+myopic = jf.mean_variance(returns).weights
+viz.save(viz.plot_turnover_schedule(res, reference_weights=myopic), "schedule.png")
+viz.save(viz.multiperiod_dashboard(res, reference_weights=myopic), "plan.png")
+```
+
+<figure markdown>
+  ![planned weight path](../img/multiperiod_glidepath.png)
+  <figcaption>Unwinding a concentrated position over ten periods: the plan bleeds the
+  holding down instead of gapping to the target on day one.</figcaption>
+</figure>
+
+<figure markdown>
+  ![execution schedule](../img/multiperiod_schedule.png)
+  <figcaption>Decaying bars are the signature of quadratic impact. The dashed line is
+  what a single rebalance to the myopic target would have traded.</figcaption>
+</figure>
+
 ## Structure &amp; correlation plots
 
 | Function | Shows |

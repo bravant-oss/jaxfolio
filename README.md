@@ -111,12 +111,13 @@ viz.save(viz.dashboard(results, returns), "dashboard.png")
 |  |  |
 |---|---|
 | **Traditional** | min-variance · mean-variance · max-Sharpe · max-diversification · risk parity (ERC) · Kelly · min-CVaR · Black–Litterman |
+| **Multi-period** | path-aware, cost-aware mean-variance over a horizon · bid-ask spread + fees + quadratic market impact priced *inside* the objective · returns an execution trajectory, not just a target |
 | **Learning** | differentiable MLP Sharpe policy · online exponentiated-gradient |
 | **Graph** | hierarchical risk parity (HRP) · HERC · MST centrality |
 | **LLM (local)** | LLM→Black-Litterman views · news-sentiment tilt · multi-agent debate — all on a local Ollama model, no API keys |
 | **Options** | Black-Scholes (European) + binomial American w/ discrete dividends · Greeks via autodiff · implied vol · volatility surface (SVI + arb checks) · 10+ multi-leg strategies · collar / covered-call overlays · execution simulator (research, not live) |
 | **Extensible** | register your own strategy · a `toolkit` of reusable building blocks · works everywhere the built-ins do |
-| **Backtest** | walk-forward engine · costs & turnover · Sharpe / Sortino / Calmar / VaR / CVaR / drawdown |
+| **Backtest** | walk-forward engine · costs & turnover · holdings-aware optimizers · step-by-step trajectory execution · Sharpe / Sortino / Calmar / VaR / CVaR / drawdown |
 | **Data** | synthetic GBM · CSV · Parquet · Yahoo Finance · option chains |
 
 ## Options

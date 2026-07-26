@@ -12,6 +12,7 @@ hashable *and* equality-stable across separately constructed configs.
 
 from __future__ import annotations
 
+import jax.numpy as jnp
 import numpy as np
 import optax
 import pytest
@@ -182,3 +183,77 @@ def test_jit_cache_stable_across_optax_configs():
     after_second = _solve_cached._cache_size()
     assert after_first == before + 1, "first optax solve should compile exactly one variant"
     assert after_second == after_first, "an equal config must reuse the compiled kernel"
+
+
+# --------------------------------------------------------------------------- #
+# Rank-agnostic solver: the (T, N) weight path used by the multi-period optimizer
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("n", [5, 17, 64, 257, 1000])
+def test_vdot_ravel_matches_dot_bitwise(n):
+    """``vdot(x.ravel(), y.ravel())`` must be *bit-identical* to ``dot(x, y)`` on 1-D.
+
+    ``_spg_loop`` was generalized from ``jnp.dot(s, y)`` (a matmul on 2-D inputs,
+    so unusable for a weight path) to the ravel-vdot spelling. That is only a
+    safe change if it does not move any existing single-period solution: both
+    lower to the same ``dot_general``. The obvious alternative
+    ``jnp.sum(x * y)`` lowers to multiply-then-reduce and differs in the last
+    bits at small ``n``, which is why it is *not* used — this test pins the
+    distinction so a future "simplification" cannot silently perturb results.
+    """
+    rng = np.random.default_rng(n)
+    x = jnp.asarray(rng.standard_normal(n), dtype=jnp.float32)
+    y = jnp.asarray(rng.standard_normal(n), dtype=jnp.float32)
+    assert jnp.vdot(x.ravel(), y.ravel()) == jnp.dot(x, y), "ravel-vdot must be bit-exact"
+
+
+def test_spg_loop_accepts_2d_variable():
+    """SPG must solve over an ``(T, N)`` variable with a row-wise projection.
+
+    The multi-period optimizer's feasible set is the Cartesian product of the
+    per-period simplices, so the projection is a row-wise ``vmap``. This checks
+    the solver core handles the 2-D variable directly: every row must land on the
+    simplex, and the separable objective must drive each row to its own optimum.
+    """
+    from jaxfolio.optimizers.base import select_projection, solve_projected_gradient
+
+    t, n = 4, 6
+    rng = np.random.default_rng(0)
+    targets = jnp.asarray(rng.random((t, n)), dtype=jnp.float32)
+    targets = targets / targets.sum(axis=1, keepdims=True)
+
+    projection, pparams = select_projection(True, (0.0, 1.0), path=True)
+    w, info = solve_projected_gradient(
+        lambda W: jnp.sum((W - targets) ** 2),
+        jnp.full((t, n), 1.0 / n),
+        lambda W: projection(W, pparams),
+        tol=1e-9,
+    )
+    w = np.asarray(w)
+    assert w.shape == (t, n)
+    assert np.allclose(w.sum(axis=1), 1.0, atol=1e-5), f"row sums={w.sum(axis=1)}"
+    assert (w >= -1e-5).all(), f"min weight={w.min()}"
+    # The objective is separable across rows and each target is already feasible,
+    # so the constrained optimum is the target itself.
+    assert np.allclose(w, np.asarray(targets), atol=1e-4), f"Δ={np.abs(w - targets).max():.4g}"
+    assert int(info["iterations"]) > 0
+
+
+def test_path_projection_rejects_aux_combination():
+    """``aux`` packs a scalar tail, ``path`` batches rows — they cannot combine."""
+    from jaxfolio.optimizers.base import select_projection
+
+    with pytest.raises(ValueError, match="aux"):
+        select_projection(True, (0.0, 1.0), aux=True, path=True)
+
+
+def test_path_projection_respects_box_bounds():
+    """The box variant must clip per row while still hitting the budget per row."""
+    from jaxfolio.optimizers.base import select_projection
+
+    projection, pparams = select_projection(False, (-0.2, 0.5), path=True)
+    rng = np.random.default_rng(3)
+    W = jnp.asarray(rng.standard_normal((5, 8)), dtype=jnp.float32)
+    out = np.asarray(projection(W, pparams))
+    assert np.allclose(out.sum(axis=1), 1.0, atol=1e-5), f"row sums={out.sum(axis=1)}"
+    assert out.min() >= -0.2 - 1e-6, f"min={out.min()}"
+    assert out.max() <= 0.5 + 1e-6, f"max={out.max()}"
