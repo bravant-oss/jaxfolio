@@ -295,7 +295,7 @@ def compile_constraints(
 
     lower, upper = _merge_boxes(specs, names, index, n, long_only, weight_bounds)
     rows = [s for s in specs if isinstance(s, RowConstraint)]
-    row_names, row_lower, row_upper, group_of = _build_rows(rows, index, n, lower, upper)
+    row_names, row_lower, row_upper, group_of = _build_rows(rows, index, n, lower, upper, names)
 
     _check_feasible_arrays(
         lower, upper, budget, row_names, row_lower, row_upper, group_of, names, rows
@@ -372,6 +372,7 @@ def _build_rows(
     n: int,
     lower: np.ndarray,
     upper: np.ndarray,
+    names: tuple[str, ...],
 ) -> tuple[list[str], list[float], list[float], np.ndarray]:
     """Assign group ids and clamp each row's limits to what the box permits."""
     group_of = np.full(n, len(rows), dtype=np.int32)  # default: ungrouped sentinel
@@ -387,7 +388,7 @@ def _build_rows(
             col = _resolve_one(asset, index, n, where)
             if col in owner:
                 raise ValueError(
-                    f"{where} and {owner[col]!r} both constrain asset index {col}. "
+                    f"{where} and {owner[col]!r} both constrain {names[col]!r}. "
                     "Group constraints must partition the universe — each asset may belong "
                     "to at most one group. That disjointness is what makes the projection "
                     "exact and the shadow prices trustworthy; overlapping groups would need "

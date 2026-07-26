@@ -151,7 +151,25 @@ The feasible set \(\mathcal{C}\) is chosen by
   with the budget hyperplane \(\sum w = \text{budget}\), solved by bisection on
   the budget multiplier.
 
+- **Named group rows** → projection onto the box and budget *intersected with*
+  sector-style rows \(L_k \le a_k'w \le U_k\), solved by a nested bisection. See
+  the [constraints guide](../guide/constraints.md).
+
 Both projections are pure JAX and safe under `jit`/`vmap`.
+
+A projection alone is anonymous — it can only say *"here is a feasible weight
+vector"*. A **named** constraint additionally carries an identity, so its
+Lagrange multiplier can be reported as the shadow price of `"tech"` and a 0%
+allocation can be attributed to whichever constraint caused it:
+
+```python
+import jaxfolio as jf
+
+res = jf.minimum_variance(returns, constraints=[
+    jf.GroupCap("tech", ["AAPL", "MSFT", "NVDA"], max=0.30),
+    jf.Box(lower=0.0, upper=0.10),
+])
+```
 
 ### `OptimizerConfig`
 

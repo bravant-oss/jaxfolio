@@ -11,6 +11,35 @@ This file is generated with [git-cliff](https://git-cliff.org) from
 
 ### Features
 
+- **Named constraints** — sector and group caps that carry an identity. Where
+  `long_only` / `weight_bounds` shape the answer anonymously, `GroupCap("tech",
+  [...], max=0.30)`, `GroupFloor`, `Box` (now accepting per-asset bound vectors)
+  and `Budget` can be *reported on*, which is the groundwork for attributing a 0%
+  allocation to the constraint that caused it. Accepted by every optimizer that
+  solves a constrained program, via `constraints=[...]` or
+  `OptimizerConfig(constraints=...)`.
+  A cap is a **guarantee**, not a preference: it is enforced by an exact Euclidean
+  projection — a nested bracketed bisection on the constraint multipliers, in the
+  same exactness class as the existing box projection — rather than by a penalty
+  that lands "near" feasible. Validated against CVXPY over 40 random problems:
+  weights to 2.1e-8, and the recovered Lagrange multipliers to 3.9e-9.
+  Two deliberate restrictions, both structural rather than temporary. **Groups must
+  partition the universe** (each asset in at most one group): disjoint supports are
+  exactly what decouples the row multipliers and keeps the projection exact, and
+  the SPG solver's stopping test only certifies KKT stationarity for an exact
+  projection — an alternating projection would break it *silently* inside
+  `lax.while_loop`. And the closed-form weightings (`risk_parity`,
+  `equal_weight`, `inverse_volatility`, the graph methods) plus
+  `multi_period_mean_variance` **raise rather than ignore** a constraint they
+  cannot honor. Infeasible sets are rejected before any solve, by a test that is
+  necessary *and* sufficient, with the offending constraint named and the gap
+  quantified.
+  Not expressible: overlapping or nested groups, rows with coefficients other than
+  1 (beta/factor limits), gross-exposure caps, cardinality and minimum position
+  size. See the [constraints guide](docs/guide/constraints.md).
+  Inert for every existing call — no named constraints means the identical solver
+  kernel, the identical jit cache entry, and bit-for-bit identical weights,
+  verified across all 14 optimizers.
 - **Multi-period ("path-aware") optimization** via the new
   `multi_period_mean_variance`. Where every existing optimizer answers "what
   should I hold?" from a snapshot, this one answers "what should I *do* today?":

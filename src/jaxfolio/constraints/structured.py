@@ -95,14 +95,24 @@ class ProjectionDuals(NamedTuple):
     identified:
         ``(n_seg,)`` mask: is ``rows[k]`` actually pinned by the data? A row's
         multiplier is identified only when at least one of its members is
-        *strictly interior* to its box. When every member sits on a bound, the
-        split of the shadow price between the row and the box bounds is genuinely
-        not determined — any split summing to the same reduced cost is an equally
-        valid KKT certificate. This kernel then reports the minimum-norm choice
-        (``theta = 0``, everything attributed to the box), which is the reading
-        users mean, but a different QP solver will legitimately report a
-        different split. Verified against CVXPY: every *identified* row agrees to
-        ~4e-9, while unidentified rows disagree by as much as 0.37.
+        *strictly interior* to its box — that member's stationarity equation is
+        the one that separates ``theta_k`` from ``beta_i``. When every member sits
+        on a bound, the split of the shadow price between the row and the box
+        bounds is genuinely not determined: any split summing to the same reduced
+        cost is an equally valid KKT certificate. This kernel then reports the
+        minimum-norm choice (``theta = 0``, everything attributed to the box),
+        which is the reading users mean, but a different QP solver will
+        legitimately report a different split. Verified against CVXPY: every
+        *identified* row agrees to ~4e-9, while unidentified rows disagree by as
+        much as 0.37.
+    budget_identified:
+        Is ``budget`` pinned by the data? Only if some coordinate is strictly
+        interior **and** free of a binding row — such a coordinate satisfies
+        ``v_i - w_i == lam`` on its own. If every interior coordinate lies inside a
+        binding row, stationarity determines only the sum ``lam + theta_k``, so the
+        returned ``budget`` is one admissible value among an interval rather than
+        *the* shadow price of capital. Callers reporting a budget shadow price must
+        check this first.
     feasibility_residual:
         ``|sum(w) - budget|`` left after the bisection and the free-set
         correction. At the float precision floor when the problem is feasible;
@@ -114,6 +124,7 @@ class ProjectionDuals(NamedTuple):
     rows: Array
     bounds: Array
     identified: Array
+    budget_identified: Array
     feasibility_residual: Array
 
 
@@ -182,14 +193,25 @@ def project_box_budget_duals(
         rows=jnp.zeros(1, dtype=w.dtype),
         bounds=beta,
         identified=jnp.zeros(1, dtype=bool),
+        # With no rows, any strictly-interior coordinate pins lam on its own.
+        budget_identified=jnp.any(_interior(w, lower, upper)),
         feasibility_residual=resid,
     )
 
 
 def _interior(w: Array, lower: Array, upper: Array) -> Array:
-    """Boolean mask of coordinates strictly inside their bounds."""
-    slack = jnp.maximum(upper - lower, 0.0)
-    eps = 1e-6 * jnp.maximum(slack, 1.0)
+    """Boolean mask of coordinates strictly inside their bounds.
+
+    The tolerance is **relative to the problem's own scale** — the largest bound
+    magnitude — rather than carrying an absolute floor. Scale-equivariance is not
+    cosmetic here: the multipliers this mask gates are homogeneous of degree one in
+    ``(v, bounds, budget)``, so an absolute tolerance would silently reclassify
+    coordinates as on-bound (and change which multipliers are reported as
+    identified) purely because the portfolio was denominated in basis points
+    instead of fractions.
+    """
+    scale = jnp.maximum(jnp.max(jnp.abs(upper)), jnp.max(jnp.abs(lower)))
+    eps = 1e-6 * jnp.where(scale > 0, scale, 1.0)
     return jnp.logical_and(w > lower + eps, w < upper - eps)
 
 
@@ -363,6 +385,9 @@ def project_grouped_duals(
         rows=theta,
         bounds=beta,
         identified=identified,
+        # lam is pinned alone only by an interior coordinate whose row is slack;
+        # inside a binding row, stationarity fixes only lam + theta_k.
+        budget_identified=jnp.any(jnp.logical_and(interior, slack[gid])),
         feasibility_residual=resid,
     )
 
