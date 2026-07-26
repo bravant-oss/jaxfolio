@@ -11,6 +11,44 @@ This file is generated with [git-cliff](https://git-cliff.org) from
 
 ### Features
 
+- **Multi-period ("path-aware") optimization** via the new
+  `multi_period_mean_variance`. Where every existing optimizer answers "what
+  should I hold?" from a snapshot, this one answers "what should I *do* today?":
+  it solves for a whole `(T, N)` weight path at once, anchored at the portfolio
+  you currently hold, with bid-ask spread, proportional fees, and quadratic market
+  impact priced *inside* the objective. `result.weights` is the first row — the
+  trade to place now — and `result.trajectory` is the full plan. Forecasts default
+  to one `(mu, Sigma)` held across the horizon, with optional `mu_path` /
+  `cov_path` term structures.
+  Note that **quadratic impact is what produces a glide path**: a purely linear
+  cost creates a no-trade region but gives no reason to split a trade, so the
+  optimum jumps once and holds (this matches an exact CVXPY QP, and is not an
+  artifact). Turnover control is deliberately **soft** — costs are priced, not
+  capped; a hard cap couples the periods and is out of scope.
+- Added `jaxfolio.TradingCosts`, a frozen cost spec in bps of traded notional per
+  unit turnover (scalar or per-asset), plus the optional
+  `PortfolioResult.trajectory` field for weight paths.
+- Five dark-themed multi-period plots in `jaxfolio.viz`: `plot_weight_path`,
+  `plot_turnover_schedule`, `plot_path_convergence`, `plot_cost_comparison`, and
+  the composite `multiperiod_dashboard`. They read a trajectory and its
+  diagnostics directly — labelling integer periods rather than dates and anchoring
+  period 0 at the book the plan starts from — and fall back to per-asset lines when
+  a path shorts, since stacked bands cannot represent signed exposures.
+  The "one-shot rebalance" reference is opt-in via `reference_weights=`: a monotone
+  path's total turnover equals `|w_T - w_prev|` *identically*, so drawing the plan's
+  own terminal weights as a reference would look like a comparison while measuring
+  nothing.
+- `backtest()` gained `holdings_aware` and `follow_trajectory`. An optimizer that
+  declares a `w_prev` keyword is now handed the live portfolio at each rebalance,
+  and a returned `trajectory` is executed step by step over the following periods
+  instead of being discarded. Both are auto-detected and **inert for every
+  existing optimizer** — no behavior change for any current strategy. Also adds a
+  `total_cost` metric; `avg_turnover` is now documented as per *trading* period,
+  which is identical to per-rebalance for path-less optimizers.
+- The shared projected-gradient solver is now rank-agnostic, so a `(T, N)` weight
+  path is a first-class variable, and `solve_constrained` /
+  `solve_projected_gradient` additionally report `info["residual"]`. Verified
+  bit-for-bit identical results for all existing single-period optimizers.
 - **`OptimizerConfig.solver` now accepts any optax optimizer**, not just
   `"spg"` / `"adam"` — by name (`solver="adamw"`, `"sgd"`, `"rmsprop"`, ...,
   resolved against `optax` and `optax.contrib`) or by factory

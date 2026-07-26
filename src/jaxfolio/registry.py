@@ -119,6 +119,7 @@ def _register_builtins() -> None:
         "kelly": "Kelly / log-growth optimal",
         "min_cvar": "Minimum conditional value-at-risk",
         "black_litterman": "Black-Litterman equilibrium + views",
+        "multi_period_mean_variance": "Path-aware, cost-aware multi-period mean-variance",
         "deep_sharpe": "Differentiable MLP Sharpe policy",
         "online_gradient": "Online exponentiated-gradient portfolio",
         "hierarchical_risk_parity": "Hierarchical risk parity (HRP)",

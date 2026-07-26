@@ -106,3 +106,83 @@ def ref_min_cvar_cvxpy(mat, alpha: float = 0.95):
     prob = cp.Problem(cp.Minimize(cvar), constraints)
     prob.solve()
     return np.asarray(w.value, dtype=float), float(prob.value)
+
+
+def ref_multi_period_cvxpy(
+    mu,
+    cov,
+    w_prev,
+    *,
+    horizon: int,
+    risk_aversion: float,
+    c_lin,
+    c_quad=0.0,
+    bounds=(0.0, 1.0),
+    long_only: bool = True,
+):
+    """Exact multi-period mean-variance-with-costs QP solved by CVXPY.
+
+    Maximizes, over a path ``W`` of shape ``(horizon, n)`` anchored at
+    ``w_prev``::
+
+        sum_t [ mu' w_t - (gamma/2) w_t' Sigma w_t
+                - c_lin * |w_t - w_{t-1}| - c_quad * (w_t - w_{t-1})**2 ]
+
+    subject to ``sum(w_t) == 1`` and the per-asset bounds at *every* period. This
+    is the **un-smoothed** problem: the L1 term is exact, so this is the true
+    reference that jaxfolio's Huber surrogate approximates.
+
+    The quadratic form is written through a Cholesky factor so convexity is
+    unambiguous to CVXPY without ``psd_wrap``, and the solver is driven to a
+    tight tolerance — at CVXPY's default the reference is only accurate to ~1e-3
+    relative, which is looser than the quantity under test.
+
+    Returns ``(W, objective_value)``. Raises ImportError if CVXPY is unavailable
+    so callers can ``importorskip``.
+    """
+    import cvxpy as cp
+
+    mu = np.asarray(mu, dtype=float)
+    cov = np.asarray(cov, dtype=float)
+    w_prev = np.asarray(w_prev, dtype=float)
+    n = len(mu)
+    lo, hi = bounds
+    # A tiny ridge absorbs sample-covariance round-off so the factorization is safe.
+    chol = np.linalg.cholesky(cov + 1e-12 * np.eye(n))
+
+    W = cp.Variable((horizon, n))
+    # Written with the variable second so ruff's SIM300 does not read a CVXPY
+    # constraint expression as a Yoda condition.
+    constraints = [cp.sum(W, axis=1) == 1.0, hi >= W]
+    constraints.append((max(lo, 0.0) if long_only else lo) <= W)
+
+    objective = 0
+    for t in range(horizon):
+        w_t = W[t, :]
+        d = w_t - (w_prev if t == 0 else W[t - 1, :])
+        objective += mu @ w_t - 0.5 * risk_aversion * cp.sum_squares(chol.T @ w_t)
+        objective -= c_lin * cp.sum(cp.abs(d))
+        if np.any(np.asarray(c_quad, dtype=float) != 0.0):
+            objective -= c_quad * cp.sum_squares(d)
+
+    prob = cp.Problem(cp.Maximize(objective), constraints)
+    prob.solve(solver=cp.CLARABEL, tol_gap_abs=1e-12, tol_gap_rel=1e-12, tol_feas=1e-12)
+    return np.asarray(W.value, dtype=float), float(prob.value)
+
+
+def multi_period_objective(path, mu, cov, w_prev, *, risk_aversion, c_lin, c_quad=0.0):
+    """Evaluate the **exact** (un-smoothed) path objective, as a maximization.
+
+    Used to score jaxfolio's answer on the same footing as the CVXPY optimum.
+    Deliberately independent of the optimizer's own internals — evaluating
+    jaxfolio's smoothed surrogate would make the comparison circular.
+    """
+    path = np.asarray(path, dtype=float)
+    mu = np.asarray(mu, dtype=float)
+    cov = np.asarray(cov, dtype=float)
+    prev = np.vstack([np.asarray(w_prev, dtype=float)[None, :], path[:-1]])
+    d = path - prev
+    utility = sum(
+        mu @ path[t] - 0.5 * risk_aversion * (path[t] @ cov @ path[t]) for t in range(len(path))
+    )
+    return float(utility - c_lin * np.abs(d).sum() - c_quad * (d**2).sum())

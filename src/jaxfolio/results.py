@@ -46,6 +46,7 @@ def finalize_result(
     periods_per_year: int = PERIODS_PER_YEAR,
     metadata: dict | None = None,
     clean_eps: float = 1e-10,
+    trajectory=None,
 ) -> PortfolioResult:
     """Assemble a :class:`PortfolioResult` with annualized diagnostics.
 
@@ -54,6 +55,10 @@ def finalize_result(
     flat float array and values below ``clean_eps`` in magnitude are zeroed. This
     is the single source of truth for the annualized return / volatility / Sharpe
     reported on every optimizer result — built-in and custom alike.
+
+    ``trajectory`` is an optional ``(T, n)`` planned weight path for multi-period
+    optimizers. It is attached verbatim — *not* cleaned by ``clean_eps``, so the
+    path keeps the solver's exact iterate while ``weights`` is tidied for display.
     """
     w = np.asarray(weights, dtype=float).reshape(-1)
     w = np.where(np.abs(w) < clean_eps, 0.0, w)
@@ -80,4 +85,5 @@ def finalize_result(
         volatility=ann_vol,
         sharpe=sharpe,
         metadata=metadata or {},
+        trajectory=trajectory,
     )

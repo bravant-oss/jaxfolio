@@ -45,6 +45,8 @@ uv run python examples/validation/run_matrix.py   # regenerates the table below
 | Risk parity (ERC) | Analytic ERC property | well-conditioned | max\|rcᵢ − 1/N\| | 8.12e-09 | 0 (exact) | PASS |
 | Minimum CVaR | CVXPY LP (exact) | well-conditioned | CVaR₉₅ | 0.01729 | 0.01353 | ⚠️ +27.84% (see notes) |
 | HRP | PyPortfolioOpt | well-conditioned | L1 weight dist. | — | — | PASS (L1=1.11e-07) |
+| Multi-period MV (linear cost) | CVXPY QP (exact) | well-conditioned | path objective | -0.0045116 | -0.0045114 | PASS |
+| Multi-period MV (impact) | CVXPY QP (exact) | well-conditioned | path objective | -0.0042534 | -0.0042533 | PASS |
 | Minimum variance | SciPy SLSQP | ill-conditioned (κ≈6.0e+04) | variance | 1.029e-04 | 1.029e-04 | PASS |
 | Risk parity (ERC) | finite / feasible | ill-conditioned (κ≈6.0e+04) | Σw, finite | feasible | — | PASS |
 | Minimum variance | exact (trivial) | degenerate: single asset | w = [1] | 1.0 | 1.0 | PASS |

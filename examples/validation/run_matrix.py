@@ -147,7 +147,73 @@ def rows_well_conditioned(returns):
 
     rows.append(_row_min_cvar(returns, mat))
     rows.append(_row_hrp(returns))
+    rows.extend(_rows_multi_period(returns))
     return rows
+
+
+def _rows_multi_period(returns):
+    """Multi-period paths against the exact CVXPY QP, in two cost regimes.
+
+    Both are reported because accuracy is regime-dependent: the impact-dominated
+    problem is smooth and strongly convex (essentially exact), while a mid-range
+    linear cost is the stiff case where the L1 term rivals the whole mean-variance
+    curvature and the Huber surrogate has to work for it.
+    """
+    try:
+        import cvxpy  # noqa: F401
+    except ImportError:  # pragma: no cover - optional dependency
+        return [
+            _skip_row(
+                "Multi-period MV (linear cost)",
+                "CVXPY QP (exact)",
+                "well-conditioned",
+                "path objective",
+            ),
+            _skip_row(
+                "Multi-period MV (impact)", "CVXPY QP (exact)", "well-conditioned", "path objective"
+            ),
+        ]
+
+    from jaxfolio.optimizers.multiperiod import multi_period_mean_variance
+    from jaxfolio.types import TradingCosts
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from tests.validation import references as vref
+
+    mu, cov, _ = _moments(returns)
+    w_prev = np.eye(len(mu))[0]
+    horizon, gamma = 4, 3.0
+    out = []
+    for label, spread_bps, impact_bps in (
+        ("Multi-period MV (linear cost)", 50.0, 0.0),
+        ("Multi-period MV (impact)", 10.0, 500.0),
+    ):
+        c_lin, c_quad = spread_bps / 1e4, impact_bps / 1e4
+        _, obj_ref = vref.ref_multi_period_cvxpy(
+            mu, cov, w_prev, horizon=horizon, risk_aversion=gamma, c_lin=c_lin, c_quad=c_quad
+        )
+        res = multi_period_mean_variance(
+            returns,
+            horizon=horizon,
+            w_prev=w_prev,
+            risk_aversion=gamma,
+            costs=TradingCosts(spread_bps=spread_bps, impact_bps=impact_bps),
+        )
+        obj = vref.multi_period_objective(
+            res.trajectory, mu, cov, w_prev, risk_aversion=gamma, c_lin=c_lin, c_quad=c_quad
+        )
+        out.append(
+            _row(
+                label,
+                "CVXPY QP (exact)",
+                "well-conditioned",
+                "path objective",
+                obj,
+                obj_ref,
+                higher_better=True,
+            )
+        )
+    return out
 
 
 def _row_min_cvar(returns, mat):
@@ -280,10 +346,12 @@ def rows_degenerate():
 
 def _row(method, reference, condition, metric, jax_val, ref_val, *, higher_better=False):
     gap = (jax_val - ref_val) / (abs(ref_val) + 1e-18)
-    if higher_better:
-        good = jax_val >= ref_val * (1 - 3e-3)
-    else:
-        good = jax_val <= ref_val * (1 + 3e-3) + 1e-9
+    # Tolerance is applied as a fraction of |ref_val| rather than of ref_val, so
+    # the comparison keeps its direction for *negative* metrics too (a
+    # mean-variance path objective is routinely negative). For positive metrics
+    # this is algebraically identical to scaling by (1 -/+ 3e-3).
+    slack = 3e-3 * abs(ref_val)
+    good = jax_val >= ref_val - slack if higher_better else jax_val <= ref_val + slack + 1e-9
     return {
         "Method": method,
         "Reference": reference,

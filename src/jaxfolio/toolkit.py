@@ -47,9 +47,10 @@ from jaxfolio.optimizers.base import (
     solve_constrained,
     solve_projected_gradient,
 )
+from jaxfolio.optimizers.multiperiod import solve_weight_path
 from jaxfolio.results import PERIODS_PER_YEAR, equal_start, finalize_result, moments
 from jaxfolio.solvers import SolverSpec, available_solvers, resolve_solver
-from jaxfolio.types import OptimizerConfig, PortfolioResult
+from jaxfolio.types import OptimizerConfig, PortfolioResult, TradingCosts
 
 Array = jnp.ndarray
 
@@ -73,6 +74,8 @@ __all__ = [
     "solve_constrained",
     "select_projection",
     "equal_start",
+    # multi-period weight paths
+    "solve_weight_path",
     # solver selection (any optax optimizer)
     "available_solvers",
     "resolve_solver",
@@ -88,6 +91,7 @@ __all__ = [
     # re-exported types for convenience
     "PortfolioResult",
     "OptimizerConfig",
+    "TradingCosts",
 ]
 
 # ``moments``, ``equal_start`` and ``finalize_result`` live in
