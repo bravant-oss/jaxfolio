@@ -12,25 +12,30 @@ docs_dir: docs
 
 theme:
   name: material
-  logo: logo.svg
-  favicon: logo.svg
+  # Only override is overrides/main.html, which appends the badge row to
+  # the primary sidebar.
+  custom_dir: overrides
+  logo: logo-white.png
+  favicon: favicon.png
   icon:
     repo: fontawesome/brands/github
   font:
-    text: IBM Plex Mono
-    code: IBM Plex Mono
+    text: Google Sans Flex
+    code: Google Sans Code
+  # `custom` suppresses Material's built-in color rules, so the neutral
+  # ramp in docs/stylesheets/extra.css owns every color on the site.
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: black
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/weather-night
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: black
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode

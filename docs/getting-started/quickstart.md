@@ -134,19 +134,19 @@ See the [Options guide](../guide/options.md).
 
 ## Where to go next
 
-<div class="jf-grid" markdown>
+<div class="site-grid" markdown>
 
-<div class="jf-card" markdown>
+<div class="site-card" markdown>
 ### [Core concepts](concepts.md)
 The shared solver, `PortfolioResult`, and the moment pipeline.
 </div>
 
-<div class="jf-card" markdown>
+<div class="site-card" markdown>
 ### [Optimizers](../guide/optimizers.md)
 All sixteen methods with their objectives and constraints.
 </div>
 
-<div class="jf-card" markdown>
+<div class="site-card" markdown>
 ### [Custom strategies](../guide/custom-strategies.md)
 Author your own method with the `toolkit` building blocks.
 </div>

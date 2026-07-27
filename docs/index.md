@@ -1,22 +1,11 @@
----
-hide:
-  - toc
----
+<div class="site-hero" markdown>
 
-<div class="jf-hero" markdown>
+<img class="site-hero__logo" src="logo.png" alt="jaxfolio logo">
 
-<img class="jf-hero__logo" src="logo.svg" alt="jaxfolio logo">
+<h1 class="site-hero__title">jaxfolio</h1>
 
-<h1 class="jf-hero__title">jaxfolio</h1>
-
-<p class="jf-hero__tagline">
+<p class="site-hero__tagline">
 Differentiable portfolio optimization &amp; options strategies, powered by JAX.
-</p>
-
-<p class="jf-badges">
-  <img alt="python" src="https://img.shields.io/badge/python-3.11+-3987e5?style=flat-square">
-  <img alt="jax" src="https://img.shields.io/badge/JAX-9085e9?style=flat-square">
-  <img alt="license" src="https://img.shields.io/badge/MIT-c98500?style=flat-square">
 </p>
 
 [Get started](getting-started/installation.md){ .md-button .md-button--primary }
@@ -55,34 +44,34 @@ option Greeks for an entire chain from the same autodiff that prices it.
 
 ## What is inside
 
-<div class="jf-grid" markdown>
+<div class="site-grid" markdown>
 
-<div class="jf-card" markdown>
+<div class="site-card" markdown>
 ### [Optimizers](guide/optimizers.md)
 Sixteen methods — classical, learning, and graph-based — behind one interface.
 </div>
 
-<div class="jf-card" markdown>
+<div class="site-card" markdown>
 ### [Backtesting](guide/backtesting.md)
 A vectorized walk-forward engine with costs, turnover, and a full metric suite.
 </div>
 
-<div class="jf-card" markdown>
+<div class="site-card" markdown>
 ### [Options](guide/options.md)
 Black–Scholes pricing, autodiff Greeks, implied vol, and 10+ multi-leg strategies.
 </div>
 
-<div class="jf-card" markdown>
+<div class="site-card" markdown>
 ### [LLM strategies](guide/llm.md)
 Local-model views routed through Black–Litterman — no API keys, fully offline.
 </div>
 
-<div class="jf-card" markdown>
+<div class="site-card" markdown>
 ### [Custom strategies](guide/custom-strategies.md)
 Register your own method; it works everywhere the built-ins do.
 </div>
 
-<div class="jf-card" markdown>
+<div class="site-card" markdown>
 ### [Visualization](guide/visualization.md)
 Publication-quality dark-themed plots for every stage of the workflow.
 </div>

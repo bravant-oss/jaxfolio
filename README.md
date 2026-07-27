@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="docs/logo.svg" alt="jaxfolio" width="120">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo-white.png">
+    <img src="docs/logo.png" alt="jaxfolio" width="120">
+  </picture>
 </p>
 
 <h1 align="center">jaxfolio</h1>
@@ -9,10 +12,10 @@
 </p>
 
 <p align="center">
-  <a href="https://bravant-oss.github.io/jaxfolio/"><img alt="docs" src="https://img.shields.io/badge/docs-jaxfolio-199e70?style=flat-square"></a>
-  <img alt="python" src="https://img.shields.io/badge/python-3.11+-3987e5?style=flat-square">
-  <img alt="jax" src="https://img.shields.io/badge/JAX-9085e9?style=flat-square">
-  <img alt="license" src="https://img.shields.io/badge/MIT-c98500?style=flat-square">
+  <a href="https://bravant-oss.github.io/jaxfolio/"><img alt="docs" src="https://img.shields.io/badge/docs-jaxfolio-ffffff?style=flat-square&labelColor=000000"></a>
+  <img alt="python" src="https://img.shields.io/badge/python-3.11+-ffffff?style=flat-square&labelColor=000000">
+  <img alt="jax" src="https://img.shields.io/badge/powered_by-JAX-ffffff?style=flat-square&labelColor=000000">
+  <img alt="license" src="https://img.shields.io/badge/license-MIT-ffffff?style=flat-square&labelColor=000000">
 </p>
 
 <br>
