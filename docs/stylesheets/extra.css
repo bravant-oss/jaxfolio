@@ -1,15 +1,131 @@
 /* ================================================================== *
- * jaxfolio docs — a flat, monospace, terminal-styled theme            *
- * (IBM Plex Mono everywhere) over Material for MkDocs.                 *
+ * jaxfolio — a flat, high-contrast theme in Google Sans Flex (text)   *
+ * and Google Sans Code (code), layered over Material for MkDocs.      *
+ *                                                                     *
+ * Ported from the Docsforge template (github.com/kleyt0n/docsforge),  *
+ * so the `--site-*` / `.site-*` namespacing is kept verbatim and this *
+ * file can be diffed against upstream. It never collides with         *
+ * Material (`md-`) or mkdocstrings (`doc-`) classes.                  *
+ *                                                                     *
+ * To rebrand: swap the nine `--site-c-*` ramp values below. Every     *
+ * other color in this file — and every Material variable it maps —    *
+ * is derived from that ramp, so nothing else needs touching.          *
  * ================================================================== */
 
+/* ------------------------------------------------------------------ *
+ * The palette. A single neutral ramp, lightest → darkest.             *
+ * ------------------------------------------------------------------ */
 :root {
-  --md-accent-fg-color: #4f46e5;
-  --jf-border: rgba(255, 255, 255, 0.12);
-  --jf-border-strong: rgba(255, 255, 255, 0.2);
+  --site-c-bright-snow:   #fafafa;
+  --site-c-platinum:      #ededed;
+  --site-c-alabaster:     #e0e0e0;
+  --site-c-pale-slate:    #cfcfcf;
+  --site-c-pale-slate-2:  #b0b0b0;
+  --site-c-slate-grey:    #757575;
+  --site-c-iron-grey:     #333333;
+  --site-c-gunmetal:      #1a1a1a;
+  --site-c-carbon-black:  #000000;
 }
 
-/* Monospace, crisp, terminal-ish rendering. */
+/* ------------------------------------------------------------------ *
+ * Light scheme — Bright Snow page, Carbon Black ink.                  *
+ * ------------------------------------------------------------------ */
+:root,
+[data-md-color-scheme="default"] {
+  /* Accent is the highest-contrast end of the ramp: hovers and active
+     states gain contrast rather than shifting hue. */
+  --md-accent-fg-color: var(--site-c-carbon-black);
+  --md-accent-fg-color--transparent: rgba(0, 0, 0, 0.1);
+
+  --md-primary-fg-color: var(--site-c-carbon-black);
+  --md-primary-fg-color--light: var(--site-c-gunmetal);
+  --md-primary-fg-color--dark: var(--site-c-carbon-black);
+  --md-primary-bg-color: var(--site-c-bright-snow);
+  --md-primary-bg-color--light: var(--site-c-pale-slate);
+
+  --md-default-bg-color: var(--site-c-bright-snow);
+  --md-default-bg-color--light: var(--site-c-bright-snow);
+  --md-default-bg-color--lighter: var(--site-c-platinum);
+  --md-default-bg-color--lightest: var(--site-c-alabaster);
+
+  --md-default-fg-color: var(--site-c-gunmetal);
+  --md-default-fg-color--light: var(--site-c-slate-grey);
+  --md-default-fg-color--lighter: var(--site-c-pale-slate-2);
+  --md-default-fg-color--lightest: var(--site-c-alabaster);
+
+  --md-code-bg-color: var(--site-c-platinum);
+  --md-code-fg-color: var(--site-c-carbon-black);
+
+  /* Material derives this from --md-primary-fg-color, which the ramp pins
+     to Carbon Black in both schemes — that leaves `.md-typeset a code`
+     (a higher-specificity rule than ours) black on a dark chip. Tie it to
+     the body ink instead so links follow the active scheme. */
+  --md-typeset-a-color: var(--site-c-gunmetal);
+
+  --md-footer-bg-color: var(--site-c-carbon-black);
+  --md-footer-bg-color--dark: var(--site-c-carbon-black);
+  --md-footer-fg-color: var(--site-c-bright-snow);
+  --md-footer-fg-color--light: var(--site-c-pale-slate-2);
+  --md-footer-fg-color--lighter: var(--site-c-slate-grey);
+
+  /* Site chrome. */
+  --site-heading: var(--site-c-carbon-black);
+  --site-border: var(--site-c-alabaster);
+  --site-border-strong: var(--site-c-pale-slate-2);
+  --site-hover: var(--site-c-platinum);
+}
+
+/* ------------------------------------------------------------------ *
+ * Dark scheme — Carbon Black page, Bright Snow ink. Same ramp, read   *
+ * from the other end.                                                 *
+ * ------------------------------------------------------------------ */
+[data-md-color-scheme="slate"] {
+  /* Hue 0 keeps whatever Material still derives itself on the neutral
+     ramp instead of tinting it blue. */
+  --md-hue: 0;
+
+  --md-accent-fg-color: var(--site-c-bright-snow);
+  --md-accent-fg-color--transparent: rgba(250, 250, 250, 0.1);
+
+  --md-primary-fg-color: var(--site-c-carbon-black);
+  --md-primary-fg-color--light: var(--site-c-gunmetal);
+  --md-primary-fg-color--dark: var(--site-c-carbon-black);
+  --md-primary-bg-color: var(--site-c-bright-snow);
+  --md-primary-bg-color--light: var(--site-c-pale-slate-2);
+
+  --md-default-bg-color: var(--site-c-carbon-black);
+  --md-default-bg-color--light: var(--site-c-carbon-black);
+  --md-default-bg-color--lighter: var(--site-c-gunmetal);
+  --md-default-bg-color--lightest: var(--site-c-iron-grey);
+
+  --md-default-fg-color: var(--site-c-platinum);
+  --md-default-fg-color--light: var(--site-c-pale-slate-2);
+  --md-default-fg-color--lighter: var(--site-c-slate-grey);
+  --md-default-fg-color--lightest: var(--site-c-gunmetal);
+
+  --md-code-bg-color: var(--site-c-gunmetal);
+  --md-code-fg-color: var(--site-c-platinum);
+
+  --md-typeset-a-color: var(--site-c-platinum);
+
+  --md-footer-bg-color: var(--site-c-carbon-black);
+  --md-footer-bg-color--dark: var(--site-c-carbon-black);
+  --md-footer-fg-color: var(--site-c-bright-snow);
+  --md-footer-fg-color--light: var(--site-c-pale-slate-2);
+  --md-footer-fg-color--lighter: var(--site-c-slate-grey);
+
+  --site-heading: var(--site-c-bright-snow);
+  --site-border: var(--site-c-iron-grey);
+  --site-border-strong: var(--site-c-slate-grey);
+  --site-hover: var(--site-c-gunmetal);
+}
+
+/* ------------------------------------------------------------------ *
+ * Type — Google Sans Flex for text and UI, Google Sans Code for code. *
+ * Both are set by `theme.font` in mkdocs.yml and reach us through     *
+ * Material's font variables, so that config stays the single source.  *
+ * Google Sans Flex ships no italic faces; browsers synthesize them.   *
+ * ------------------------------------------------------------------ */
 body,
 .md-typeset,
 .md-nav,
@@ -17,56 +133,55 @@ body,
 .md-footer,
 input,
 button {
-  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--md-text-font-family), system-ui, -apple-system, sans-serif;
   font-feature-settings: normal;
   -webkit-font-smoothing: antialiased;
 }
 
+.md-typeset code,
+.md-typeset pre,
+.md-typeset kbd {
+  font-family: var(--md-code-font-family), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+}
+
 .md-typeset {
   line-height: 1.7;
-  font-size: 0.76rem;
+  font-size: 0.8rem;
 }
 
 /* ------------------------------------------------------------------ *
- * True-black scheme, aligned with the library's dark viz palette.     *
+ * Structural chrome — borders that frame the columns.                 *
  * ------------------------------------------------------------------ */
-[data-md-color-scheme="slate"] {
-  --md-hue: 0;
-  --md-default-bg-color: #0a0a0a;
-  --md-default-bg-color--light: #0d0d0d;
-  --md-default-bg-color--lighter: #141413;
-  --md-default-bg-color--lightest: #1a1a19;
-  --md-code-bg-color: #101010;
-  --md-code-fg-color: #e6e6e6;
-  --md-footer-bg-color: #000000;
-  --md-footer-bg-color--dark: #000000;
-  --md-default-fg-color--lightest: rgba(255, 255, 255, 0.1);
-}
-
-/* ------------------------------------------------------------------ *
- * Structural chrome — borders that frame the columns like a TUI.      *
- * ------------------------------------------------------------------ */
+/* Header and footer stay Carbon Black in both schemes, so the white
+   mark and the page frame read the same either way. */
 .md-header {
-  background-color: #000;
-  border-bottom: 1px solid var(--jf-border);
+  background-color: var(--site-c-carbon-black);
+  color: var(--site-c-bright-snow);
+  border-bottom: 1px solid var(--site-c-iron-grey);
   box-shadow: none;
 }
 .md-footer {
-  background-color: #000;
-  border-top: 1px solid var(--jf-border);
+  background-color: var(--site-c-carbon-black);
+  border-top: 1px solid var(--site-c-iron-grey);
 }
 .md-footer-meta {
-  background-color: #000;
+  background-color: var(--site-c-carbon-black);
   font-size: 0.68rem;
+}
+.md-footer__link:hover,
+.md-footer-meta .md-footer__link:focus {
+  color: var(--site-c-bright-snow);
+  opacity: 1;
 }
 
 /* Sidebar / TOC column dividers. */
 @media screen and (min-width: 76.25em) {
   .md-sidebar--primary {
-    border-right: 1px solid var(--jf-border);
+    border-right: 1px solid var(--site-border);
   }
   .md-sidebar--secondary {
-    border-left: 1px solid var(--jf-border);
+    border-left: 1px solid var(--site-border);
   }
 }
 
@@ -77,29 +192,35 @@ button {
 }
 .md-search__form {
   border-radius: 0;
-  border: 1px solid var(--jf-border);
-  background-color: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--site-c-iron-grey);
+  background-color: var(--site-c-gunmetal);
   box-shadow: none;
+}
+.md-search__form:hover {
+  background-color: var(--site-c-iron-grey);
 }
 .md-search__input {
   border-radius: 0;
+  color: var(--site-c-bright-snow);
+}
+.md-search__input::placeholder,
+.md-search__icon {
+  color: var(--site-c-pale-slate-2);
 }
 [data-md-toggle="search"]:checked ~ .md-header .md-search__output,
 .md-search__output {
   border-radius: 0;
 }
 
-/* Header logo: thin line-art, so scale it up and add a faint glow. */
+/* Header logo: a solid mark, so it needs room but no glow to carry it. */
 .md-header__button.md-logo {
   padding: 0.2rem;
   margin: 0.1rem 0.2rem 0.1rem 0;
 }
 .md-header__button.md-logo img,
 .md-header__button.md-logo svg {
-  height: 1.9rem;
-  width: 1.9rem;
-  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.35))
-          drop-shadow(0 0 1px rgba(255, 255, 255, 0.9));
+  height: 1.7rem;
+  width: 1.7rem;
 }
 
 /* ------------------------------------------------------------------ *
@@ -115,7 +236,7 @@ button {
 /* Section labels (Getting started / User guide / API reference). */
 .md-nav__item--section > .md-nav__link,
 .md-nav--primary .md-nav__item--section > label.md-nav__link {
-  color: var(--md-default-fg-color);
+  color: var(--site-heading);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -130,16 +251,16 @@ button {
   transition: background-color 100ms ease, color 100ms ease;
 }
 .md-nav__link:hover {
-  color: var(--md-default-fg-color);
-  background-color: rgba(255, 255, 255, 0.04);
+  color: var(--site-heading);
+  background-color: var(--site-hover);
 }
 .md-nav__link--active,
 .md-nav__link--active:focus,
 .md-nav__link--active:hover,
 .md-nav__item .md-nav__link--active {
-  color: var(--md-default-fg-color);
+  color: var(--site-heading);
   font-weight: 700;
-  background-color: var(--md-default-fg-color--lightest);
+  background-color: var(--site-hover);
   box-shadow: inset 3px 0 0 var(--md-accent-fg-color);
   padding-left: 0.9rem;
 }
@@ -152,38 +273,63 @@ button {
   font-weight: 700;
 }
 
+/* Project badges, closing out the primary sidebar on every page. Injected
+   by overrides/main.html; each shield carries a black label and a white
+   message, so one half always contrasts with the page. Sitting outside
+   `.md-typeset` means there are no inherited image borders to undo. */
+.site-badges--nav {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  margin: 1.1rem 0 0.5rem;
+  padding: 1rem 0.6rem 0;
+  border-top: 1px solid var(--site-border);
+}
+.site-badges--nav img {
+  height: 18px;
+  opacity: 0.8;
+  transition: opacity 100ms ease;
+}
+.site-badges--nav:hover img {
+  opacity: 1;
+}
+
 /* ------------------------------------------------------------------ *
- * Typography — mono headings, subtle underlined links.                *
+ * Typography — flat headings, subtle underlined links.                *
  * ------------------------------------------------------------------ */
 .md-typeset h1 {
   font-weight: 700;
   font-size: 2rem;
   letter-spacing: 0;
-  color: var(--md-default-fg-color);
+  color: var(--site-heading);
   margin-bottom: 0.3rem;
 }
 .md-typeset h2 {
   font-weight: 700;
   font-size: 1.35rem;
   letter-spacing: 0;
+  color: var(--site-heading);
   margin-top: 2.4em;
   padding-top: 1em;
-  border-top: 1px solid var(--md-default-fg-color--lightest);
+  border-top: 1px solid var(--site-border);
 }
 .md-typeset h3 {
   font-weight: 700;
   font-size: 1.05rem;
   letter-spacing: 0;
+  color: var(--site-heading);
 }
 .md-typeset h4 {
   font-weight: 700;
+  color: var(--site-heading);
 }
 
 /* Inline links: thin underline, accent on hover. */
 .md-typeset a {
   color: var(--md-default-fg-color);
   text-decoration: underline;
-  text-decoration-color: var(--jf-border-strong);
+  text-decoration-color: var(--site-border-strong);
   text-underline-offset: 3px;
   text-decoration-thickness: 1px;
   transition: color 100ms ease, text-decoration-color 100ms ease;
@@ -209,31 +355,35 @@ button {
   font-size: 0.86em;
   padding: 0.1em 0.35em;
 }
-[data-md-color-scheme="slate"] .md-typeset .highlight,
-[data-md-color-scheme="slate"] .md-typeset pre > code {
-  border: 1px solid var(--jf-border);
+.md-typeset .highlight,
+.md-typeset pre > code {
+  border: 1px solid var(--site-border);
 }
 
 .md-typeset table:not([class]) {
-  border: 1px solid var(--jf-border);
+  border: 1px solid var(--site-border);
   border-radius: 0;
   overflow: hidden;
   font-size: 0.72rem;
 }
 .md-typeset table:not([class]) th {
   font-weight: 700;
-  background: rgba(255, 255, 255, 0.04);
+  color: var(--site-heading);
+  background: var(--site-hover);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-size: 0.68rem;
+}
+.md-typeset table:not([class]) td {
+  border-top: 1px solid var(--site-border);
 }
 
 .md-typeset img {
   border-radius: 0;
 }
 .md-typeset figure img,
-.md-typeset p > img:not(.jf-hero__logo) {
-  border: 1px solid var(--jf-border);
+.md-typeset p > img:not(.site-hero__logo):not(.site-badge) {
+  border: 1px solid var(--site-border);
   box-shadow: none;
 }
 .md-typeset figcaption {
@@ -245,15 +395,98 @@ button {
 .md-typeset .admonition,
 .md-typeset details {
   border-radius: 0;
-  border: 1px solid var(--jf-border);
+  border: 1px solid var(--site-border);
   border-left-width: 3px;
+  border-left-color: var(--site-border-strong);
+  background-color: var(--md-default-bg-color);
   font-size: 0.72rem;
   box-shadow: none;
+}
+
+/* Admonitions stay on the neutral ramp — Material's hue-coded variants
+   are overridden so callouts read as weight, not color. Emphasis rises
+   with the left rule: note → tip → warning → danger.
+   Material emits those variants at `.md-typeset .admonition.<type>` and
+   `.md-typeset .<type> > .admonition-title` — three classes. Every
+   override below matches that specificity and wins on source order; a
+   lighter selector (`.md-typeset .note`) loses and the callout comes out
+   blue. Deviates from upstream Docsforge, which is a class short. */
+.md-typeset .admonition > .admonition-title,
+.md-typeset details > summary {
+  background-color: var(--site-hover);
+  border: none;
+  color: var(--site-heading);
+  font-weight: 700;
+}
+.md-typeset .admonition > .admonition-title::before,
+.md-typeset details > summary::before {
+  background-color: var(--site-heading);
+}
+.md-typeset .admonition > :last-child,
+.md-typeset details > :last-child {
+  margin-bottom: 0.6rem;
+}
+
+.md-typeset .admonition.note,
+.md-typeset details.note,
+.md-typeset .admonition.info,
+.md-typeset details.info,
+.md-typeset .admonition.abstract,
+.md-typeset details.abstract,
+.md-typeset .admonition.example,
+.md-typeset details.example,
+.md-typeset .admonition.quote,
+.md-typeset details.quote {
+  border-color: var(--site-border);
+  border-left-color: var(--site-c-pale-slate-2);
+}
+.md-typeset .admonition.tip,
+.md-typeset details.tip,
+.md-typeset .admonition.success,
+.md-typeset details.success,
+.md-typeset .admonition.question,
+.md-typeset details.question {
+  border-color: var(--site-border);
+  border-left-color: var(--site-c-slate-grey);
+}
+.md-typeset .admonition.warning,
+.md-typeset details.warning,
+.md-typeset .admonition.failure,
+.md-typeset details.failure {
+  border-color: var(--site-border);
+  border-left-color: var(--site-heading);
+}
+.md-typeset .admonition.danger,
+.md-typeset details.danger,
+.md-typeset .admonition.bug,
+.md-typeset details.bug {
+  border-color: var(--site-border);
+  border-left-width: 5px;
+  border-left-color: var(--site-heading);
 }
 
 /* Content buttons flat. */
 .md-typeset .md-button {
   border-radius: 0;
+  color: var(--site-heading);
+  border-color: var(--site-border-strong);
+}
+.md-typeset .md-button:hover,
+.md-typeset .md-button:focus {
+  background-color: var(--md-accent-fg-color);
+  border-color: var(--md-accent-fg-color);
+  color: var(--md-default-bg-color);
+}
+.md-typeset .md-button--primary {
+  background-color: var(--md-accent-fg-color);
+  border-color: var(--md-accent-fg-color);
+  color: var(--md-default-bg-color);
+}
+.md-typeset .md-button--primary:hover,
+.md-typeset .md-button--primary:focus {
+  background-color: transparent;
+  border-color: var(--md-accent-fg-color);
+  color: var(--md-accent-fg-color);
 }
 
 /* mkdocstrings signatures. */
@@ -262,150 +495,140 @@ button {
 }
 
 /* ================================================================== *
- * Home hero — flat, monospace, always-dark so the white logo reads.   *
+ * Home hero — no panel, no gradient, no texture. Just the mark, the   *
+ * name, one sentence, the badges, and two links, separated from the   *
+ * page by a single rule. It inherits the page background, so it reads *
+ * correctly in both schemes. Markup lives in docs/index.md.           *
  * ================================================================== */
-.jf-hero {
-  position: relative;
-  text-align: center;
-  margin: 0.5rem 0 2.5rem;
-  padding: 3.2rem 1.5rem 3rem;
-  overflow: hidden;
-  isolation: isolate;
-  background:
-    radial-gradient(120% 140% at 50% -10%, rgba(255, 255, 255, 0.14), transparent 55%),
-    linear-gradient(180deg, #121212 0%, #0a0a0a 100%);
-  border: 1px solid var(--jf-border);
-}
-
-/* Terminal grid texture behind the hero. */
-.jf-hero::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-  background-size: 40px 40px;
-  mask-image: radial-gradient(70% 70% at 50% 40%, #000 30%, transparent 100%);
-  -webkit-mask-image: radial-gradient(70% 70% at 50% 40%, #000 30%, transparent 100%);
-}
-
-.jf-hero__logo {
-  width: 104px;
-  height: 104px;
-  margin: 0 auto 0.6rem;
-  border: none !important;
-  box-shadow: none !important;
-  filter: drop-shadow(0 0 20px rgba(255, 255, 255, 0.35))
-          drop-shadow(0 0 2px rgba(255, 255, 255, 0.7));
-}
-
-.md-typeset .jf-hero__title {
-  margin: 0.2rem 0 0;
-  font-size: 3rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  line-height: 1;
-  color: #fff;
-  border-top: none;
+/* Material reserves `padding-top: .6rem` plus a `.4rem` ::before spacer
+   above the first block of every page. The hero sets its own rhythm, so
+   reclaim that 1rem and let it sit right under the header. */
+.md-content__inner:has(> .site-hero) {
   padding-top: 0;
 }
-.md-typeset .jf-hero__title .headerlink {
+.md-content__inner:has(> .site-hero)::before {
   display: none;
 }
 
-.jf-hero__tagline {
-  font-size: 0.95rem;
-  line-height: 1.6;
-  color: rgba(255, 255, 255, 0.68);
-  max-width: 38rem;
-  margin: 1rem auto 1.5rem;
+.site-hero {
+  text-align: center;
+  max-width: 42rem;
+  margin: 0 auto 2.25rem;
+  padding: 1.75rem 1rem 2.75rem;
+  border-bottom: 1px solid var(--site-border);
 }
 
-.jf-badges {
-  margin: 0 0 1.6rem;
+/* Markdown wraps the logo, the badges, and the button row in paragraphs of
+   their own; zero them, then set the hero's rhythm explicitly below. Note
+   that `.md-typeset .site-hero > p` outranks a bare `.site-hero__tagline`,
+   so every spacing rule that follows carries the same weight — written any
+   lighter, it loses to this reset and the hero collapses flush. */
+.md-typeset .site-hero > p {
+  margin: 0;
 }
-.jf-badges img {
+
+/* Logo → title → tagline → buttons, each step a little wider than the
+   last. The badges live in the sidebar, not here. */
+.md-typeset .site-hero > p.site-hero__tagline {
+  margin: 1.1rem auto 0;
+}
+.md-typeset .site-hero > p:last-child {
+  margin-top: 1.8rem;
+}
+
+/* The mark ships as Carbon Black art for the light page; the dark scheme
+   inverts it rather than loading a second asset — the strokes land within
+   a percent of Bright Snow. */
+.site-hero__logo {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 1.1rem;
   border: none !important;
   box-shadow: none !important;
-  margin: 0 3px;
-  vertical-align: middle;
+}
+[data-md-color-scheme="slate"] .site-hero__logo {
+  filter: invert(1);
 }
 
-/* Flat, terminal-style hero buttons. */
-.jf-hero .md-button {
-  margin: 0.3rem 0.35rem;
-  border-radius: 0;
+.md-typeset .site-hero__title {
+  margin: 0;
+  font-size: 2.6rem;
   font-weight: 700;
-  box-shadow: none;
-  transition: background-color 100ms ease, color 100ms ease, border-color 100ms ease;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--site-heading);
+  border-top: none;
+  padding-top: 0;
 }
-.jf-hero .md-button--primary {
-  background: var(--md-accent-fg-color);
-  border-color: var(--md-accent-fg-color);
-  color: #fff;
-}
-.jf-hero .md-button--primary:hover {
-  background: #fff;
-  border-color: #fff;
-  color: #0a0a0a;
-}
-.jf-hero .md-button:not(.md-button--primary) {
-  color: #fff;
-  border-color: var(--jf-border-strong);
-}
-.jf-hero .md-button:not(.md-button--primary):hover {
-  background: #fff;
-  border-color: #fff;
-  color: #0a0a0a;
+.md-typeset .site-hero__title .headerlink {
+  display: none;
 }
 
-.jf-hero + h2 {
+.md-typeset .site-hero__tagline {
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--md-default-fg-color--light);
+  max-width: 30rem;
+}
+
+/* Spacing only — the shared .md-button rules already handle the
+   colors, and they follow the active scheme. */
+.site-hero .md-button {
+  margin: 0.25rem 0.2rem;
+  font-weight: 700;
+  font-size: 0.7rem;
+  padding: 0.5em 1.2em;
+}
+
+.site-hero + h2 {
   border-top: none;
-  margin-top: 1rem;
+  margin-top: 0;
   padding-top: 0;
 }
 
 @media screen and (max-width: 44.9375em) {
-  .jf-hero { padding: 2.4rem 1rem; }
-  .jf-hero__logo { width: 80px; height: 80px; }
-  .md-typeset .jf-hero__title { font-size: 2.2rem; }
+  .site-hero {
+    padding: 1rem 1rem 1.75rem;
+    margin-bottom: 1.75rem;
+  }
+  .site-hero__logo { width: 58px; height: 58px; }
+  .md-typeset .site-hero__title { font-size: 1.8rem; }
 }
 
 /* ------------------------------------------------------------------ *
- * Feature grid — flat bordered cards.                                 *
+ * Feature grid — flat bordered cards. Auto-fits 1–3 columns.          *
  * ------------------------------------------------------------------ */
-.jf-grid {
+.site-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
   gap: 1px;
   margin: 1.5rem 0;
-  background: var(--jf-border);
-  border: 1px solid var(--jf-border);
+  background: var(--site-border);
+  border: 1px solid var(--site-border);
 }
-.jf-card {
+.site-card {
   padding: 1.1rem 1.25rem;
   background: var(--md-default-bg-color);
   transition: background-color 120ms ease;
 }
-.jf-card:hover {
-  background-color: rgba(255, 255, 255, 0.03);
+.site-card:hover {
+  background-color: var(--site-hover);
 }
-.jf-card h3 {
+.site-card h3 {
   margin: 0 0 0.4rem;
   font-size: 0.85rem;
   font-weight: 700;
+  color: var(--site-heading);
 }
-.jf-card p {
+.site-card p {
   margin: 0;
   font-size: 0.72rem;
   color: var(--md-default-fg-color--light);
 }
-.jf-card a {
+.site-card a {
   text-decoration: none;
 }
-.jf-card a:hover {
+.site-card a:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
 }

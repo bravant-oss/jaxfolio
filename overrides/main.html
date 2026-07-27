@@ -1,0 +1,43 @@
+{#-
+  Puts the project badges at the foot of the primary sidebar, on every page.
+
+  Material exposes no hook *inside* the sidebar, so the `site_nav` block is
+  reproduced verbatim from its base.html (9.7.x) with a single addition,
+  marked below. Nothing else here differs from upstream — diff this block
+  against `material/templates/base.html` after a major Material upgrade.
+-#}
+{% extends "base.html" %}
+
+{% block site_nav %}
+  {% if nav %}
+    {% if page.meta and page.meta.hide %}
+      {% set hidden = "hidden" if "navigation" in page.meta.hide %}
+    {% endif %}
+    <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" {{ hidden }}>
+      <div class="md-sidebar__scrollwrap">
+        <div class="md-sidebar__inner">
+          {% include "partials/nav.html" %}
+          {# --- addition: project badges --- #}
+          <div class="site-badges site-badges--nav">
+            <img alt="python 3.11+" src="https://img.shields.io/badge/python-3.11+-ffffff?style=flat-square&labelColor=000000">
+            <img alt="powered by JAX" src="https://img.shields.io/badge/powered_by-JAX-ffffff?style=flat-square&labelColor=000000">
+            <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-ffffff?style=flat-square&labelColor=000000">
+          </div>
+          {# --- end addition --- #}
+        </div>
+      </div>
+    </div>
+  {% endif %}
+  {% if "toc.integrate" not in features %}
+    {% if page.meta and page.meta.hide %}
+      {% set hidden = "hidden" if "toc" in page.meta.hide %}
+    {% endif %}
+    <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" {{ hidden }}>
+      <div class="md-sidebar__scrollwrap">
+        <div class="md-sidebar__inner">
+          {% include "partials/toc.html" %}
+        </div>
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}
