@@ -1,8 +1,9 @@
 # Data
 
 Optimizers consume a wide **returns panel** — rows are periods, columns are
-assets — as a pandas `DataFrame` or a 2-D array. jaxfolio provides a reproducible
-synthetic generator plus loaders for CSV, Parquet, and Yahoo Finance, and
+assets — as a Polars `DataFrame` or a 2-D array. Dates stay visible in a `date`
+column and are excluded from optimizer matrices automatically. jaxfolio provides
+a reproducible synthetic generator plus loaders for CSV, Parquet, and Yahoo Finance, and
 utilities to convert prices to returns and split them for out-of-sample testing.
 
 ## Synthetic data

@@ -68,7 +68,7 @@ def test_custom_from_weights_valid(returns):
 
 
 def test_custom_from_weights_accepts_mapping(returns):
-    assets = list(returns.columns)
+    assets = jf.asset_columns(returns)
 
     def pick_first(r):
         return {assets[0]: 1.0}
@@ -99,7 +99,7 @@ def test_custom_from_objective_uses_context_n(returns):
         return w @ ctx.cov @ w
 
     CustomStrategy.from_objective("cap", obj)(returns)
-    assert seen["n"] == len(returns.columns)
+    assert seen["n"] == len(jf.asset_columns(returns))
 
 
 def test_custom_from_objective_honors_solver(returns):

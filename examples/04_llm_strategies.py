@@ -58,7 +58,7 @@ def make_client(assets: list[str], live: bool):
 def main() -> None:
     live = "--live" in sys.argv
     returns = jf.generate_returns(n_assets=8, n_days=756, seed=7)
-    assets = list(returns.columns)
+    assets = jf.asset_columns(returns)
     print(f"Mode: {f'LIVE (Ollama {_live_model()})' if live else 'offline (FakeLLM)'}\n")
 
     # 1 — LLM-enhanced Black-Litterman (ICLR 2025): sampled views + calibrated confidence.

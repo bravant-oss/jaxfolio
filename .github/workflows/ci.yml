@@ -50,8 +50,12 @@ jobs:
       - name: Install deps
         run: uv sync --extra data --extra llm --extra dev
       # Coverage floor (fail_under) is enforced from [tool.coverage.report].
+      # `-n auto` fans the suite across the runner's cores (4 on ubuntu/windows,
+      # 3 on the arm64 macOS image). pytest-cov merges the per-worker data, so
+      # the floor is still enforced on every leg; coverage tracing costs ~19% of
+      # wall clock serially but only ~3% here, because it parallelizes too.
       - name: Run tests
-        run: uv run pytest --cov=jaxfolio --cov-report=term-missing
+        run: uv run pytest -n auto --cov=jaxfolio --cov-report=term-missing
 
   # Numerical-validation matrix against external reference solvers
   # (SciPy / CVXPY / PyPortfolioOpt). Runs on a single canonical leg because the

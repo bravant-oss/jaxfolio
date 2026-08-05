@@ -75,7 +75,7 @@ def simulate_covered_call_roll(
     Parameters
     ----------
     prices:
-        1-D array (or pandas Series) of underlying prices along the path.
+        1-D array (or Polars Series) of underlying prices along the path.
     moneyness:
         Call strike relative to spot (``1.05`` = 5% out-of-the-money).
     tenor:

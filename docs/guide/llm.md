@@ -123,7 +123,7 @@ realistic enough to exercise the confidence calibration:
 import json, numpy as np
 from jaxfolio.llm import FakeLLM
 
-assets = list(returns.columns)
+assets = jf.asset_columns(returns)
 
 def responder(prompt: str, i: int) -> str:
     rng = np.random.default_rng(i + 1)

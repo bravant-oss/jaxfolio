@@ -18,7 +18,7 @@ need them, so the core install stays lean.
     pip install jaxfolio
     ```
 
-The core install pulls in `jax`, `jaxlib`, `optax`, `numpy`, `pandas`, `scipy`,
+The core install pulls in `jax`, `jaxlib`, `optax`, `numpy`, `polars`, `scipy`,
 and `matplotlib` — everything needed for the optimizers, the backtester, the
 options toolkit, and the visualizations.
 

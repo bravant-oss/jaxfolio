@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import jaxfolio as jf
 from jaxfolio.moments.estimators import as_matrix, sample_covariance
 from jaxfolio.optimizers import classical as C
 from jaxfolio.types import OptimizerConfig
@@ -34,7 +35,7 @@ def test_weights_sum_to_one_long_only(returns, method):
 
 def test_equal_weight_is_uniform(returns):
     res = C.equal_weight(returns)
-    n = len(returns.columns)
+    n = len(jf.asset_columns(returns))
     assert np.allclose(res.weights, 1.0 / n)
 
 
@@ -94,7 +95,7 @@ def test_min_cvar_honors_explicit_optax_solver(returns):
 
 
 def test_black_litterman_with_views(returns):
-    assets = list(returns.columns)
+    assets = jf.asset_columns(returns)
     views = {assets[0]: 0.001, assets[1]: -0.0005}
     res = C.black_litterman(returns, views=views)
     assert res.metadata["n_views"] == 2

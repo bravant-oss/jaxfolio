@@ -29,6 +29,7 @@ import pickle
 import re
 
 import numpy as np
+import polars as pl
 import pytest
 
 import jaxfolio as jf
@@ -44,7 +45,7 @@ def panel():
 
 @pytest.fixture(scope="module")
 def names(panel):
-    return list(panel.columns)
+    return jf.asset_columns(panel)
 
 
 @pytest.fixture(scope="module")
@@ -158,7 +159,7 @@ def test_multipliers_scale_with_the_objective(panel, names):
     an absolute tolerance standing in for a relative one anywhere in the chain.
     """
     a = explain(_capped(panel, names))
-    b = explain(_capped(panel * 100.0, names))
+    b = explain(_capped(panel.with_columns(pl.col(names) * 100.0), names))
     assert np.allclose(a.weights, b.weights, atol=1e-4), "weights should be scale-invariant"
     ratio = b.constraints[0].multiplier / a.constraints[0].multiplier
     assert np.isclose(ratio, 1e4, rtol=1e-3), f"multiplier scaled by {ratio:.6g}, expected 1e4"
@@ -430,7 +431,7 @@ def test_optimizers_without_duals_return_a_wellformed_report(panel, method):
     assert all(a.primary_shadow_price is None for a in report.assets_detail)
     frame = report.to_frame()
     assert len(frame) == len(report.assets)
-    assert frame["shadow_price"].isna().all(), "no shadow price may be invented"
+    assert frame["shadow_price"].is_nan().all(), "no shadow price may be invented"
 
 
 def test_risk_parity_points_at_its_own_attribution_output(panel):
@@ -503,7 +504,7 @@ def test_report_surface(panel, names):
     """``to_frame`` / ``constraints_frame`` / ``for_asset`` / ``binding`` / text."""
     report = explain(_capped(panel, names, cap=0.10))
     frame = report.to_frame()
-    assert list(frame.index) == list(report.assets)
+    assert frame.get_column("asset").to_list() == list(report.assets)
     assert {
         "weight",
         "status",
@@ -517,8 +518,8 @@ def test_report_surface(panel, names):
     } <= set(frame.columns)
 
     cframe = report.constraints_frame()
-    assert list(cframe.index) == ["tech"]
-    assert cframe.loc["tech", "status"] == "binding"
+    assert cframe.get_column("name").to_list() == ["tech"]
+    assert cframe.filter(cframe["name"] == "tech")["status"].item() == "binding"
 
     assert len(report.binding()) == 1
     assert report.for_asset(names[0]).asset == names[0]
@@ -729,7 +730,7 @@ def test_unavailable_report_serializes(panel):
     assert payload["available"] is False
     assert payload["constraints"] == []
     assert "risk_contributions" in payload["reason"]
-    assert len(payload["assets"]) == len(panel.columns)
+    assert len(payload["assets"]) == len(jf.asset_columns(panel))
 
 
 def test_weights_are_unchanged_by_capturing_attribution(panel, names):

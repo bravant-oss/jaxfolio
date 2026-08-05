@@ -61,7 +61,7 @@ def test_plot_dendrogram_smoke(returns):
 # Multi-period plots
 # --------------------------------------------------------------------------- #
 def _mp_result(returns, **costs):
-    n = len(returns.columns)
+    n = len(jf.asset_columns(returns))
     w_prev = np.eye(n)[0]
     return jf.multi_period_mean_variance(
         returns,
@@ -96,7 +96,7 @@ def test_plot_weight_path_handles_shorting(returns):
     """A signed path cannot be stacked, so it must fall back to lines."""
     from jaxfolio import viz
 
-    n = len(returns.columns)
+    n = len(jf.asset_columns(returns))
     res = jf.multi_period_mean_variance(
         returns,
         horizon=4,

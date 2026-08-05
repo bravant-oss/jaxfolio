@@ -21,8 +21,8 @@ from jaxfolio.custom import custom_strategy
 
 def momentum_weights(returns):
     """Weight proportional to trailing cumulative return, clipped at zero."""
-    cum = (1.0 + returns).prod() - 1.0
-    return np.clip(cum.to_numpy(), 0.0, None)
+    cum = np.prod(1.0 + returns.to_numpy(), axis=0) - 1.0
+    return np.clip(cum, 0.0, None)
 
 momentum = custom_strategy(
     "momentum",
@@ -137,6 +137,8 @@ Custom strategies drop straight into `compare` and the dashboard alongside the
 built-ins:
 
 ```python
+import polars as pl
+
 from jaxfolio.backtest import compare, metrics_table
 
 results = compare(returns, {
@@ -147,7 +149,7 @@ results = compare(returns, {
     "1/N":                     jf.equal_weight,
 }, lookback=252, rebalance_every=21)
 
-print(metrics_table(results).round(3))
+print(metrics_table(results).with_columns(pl.selectors.numeric().round(3)))
 ```
 
 <figure markdown>

@@ -46,6 +46,10 @@ def _w_prev(n: int) -> np.ndarray:
     return np.eye(n)[0]
 
 
+def _n(frame) -> int:
+    return as_matrix(frame)[0].shape[1]
+
+
 def _moments(returns):
     mat, _ = as_matrix(returns)
     return np.asarray(mean_returns(mat)), np.asarray(sample_covariance(mat))
@@ -66,7 +70,7 @@ def test_every_row_is_feasible(small_returns):
     path onto a single simplex would still give ``traj.sum() == 1`` overall while
     each row summed to ``1/T`` — hence the per-row assertion.
     """
-    n = len(small_returns.columns)
+    n = _n(small_returns)
     res = mp(small_returns, horizon=5, w_prev=_w_prev(n), costs=TradingCosts(spread_bps=10.0))
     traj = res.trajectory
     assert traj.shape == (5, n), f"expected (5, {n}), got {traj.shape}"
@@ -76,7 +80,7 @@ def test_every_row_is_feasible(small_returns):
 
 
 def test_every_row_respects_weight_bounds(small_returns):
-    n = len(small_returns.columns)
+    n = _n(small_returns)
     res = mp(
         small_returns,
         horizon=4,
@@ -90,7 +94,7 @@ def test_every_row_respects_weight_bounds(small_returns):
 
 
 def test_long_short_allows_negative_rows(returns):
-    n = len(returns.columns)
+    n = _n(returns)
     res = mp(
         returns,
         horizon=3,
@@ -107,7 +111,7 @@ def test_long_short_allows_negative_rows(returns):
 # --------------------------------------------------------------------------- #
 def test_first_row_is_reported_weights(small_returns):
     """``weights`` is the allocation to hold *now* — the backtester relies on it."""
-    n = len(small_returns.columns)
+    n = _n(small_returns)
     res = mp(small_returns, horizon=4, w_prev=_w_prev(n), costs=TradingCosts(impact_bps=500.0))
     assert np.allclose(res.weights, res.trajectory[0], atol=1e-9), (
         f"Δ={np.abs(res.weights - res.trajectory[0]).max():.4g}"
@@ -115,7 +119,7 @@ def test_first_row_is_reported_weights(small_returns):
 
 
 def test_terminal_metadata_matches_last_row(small_returns):
-    n = len(small_returns.columns)
+    n = _n(small_returns)
     res = mp(small_returns, horizon=4, w_prev=_w_prev(n), costs=TradingCosts(impact_bps=500.0))
     assert np.allclose(res.metadata["terminal_weights"], res.trajectory[-1], atol=1e-12)
     assert res.metadata["terminal_sharpe"] is not None
@@ -123,7 +127,7 @@ def test_terminal_metadata_matches_last_row(small_returns):
 
 def test_metadata_contract(small_returns):
     """The documented diagnostics must all be present and JSON-serializable."""
-    n = len(small_returns.columns)
+    n = _n(small_returns)
     res = mp(small_returns, horizon=5, w_prev=_w_prev(n), costs=TradingCosts(spread_bps=20.0))
     expected = {
         "horizon",
@@ -160,7 +164,7 @@ def test_metadata_contract(small_returns):
 
 def test_turnover_path_matches_trajectory(small_returns):
     """Recompute the planned turnover independently — guards a stale-iterate bug."""
-    n = len(small_returns.columns)
+    n = _n(small_returns)
     wp = _w_prev(n)
     res = mp(small_returns, horizon=5, w_prev=wp, costs=TradingCosts(impact_bps=400.0))
     prev = np.vstack([wp[None, :], res.trajectory[:-1]])
@@ -172,7 +176,7 @@ def test_turnover_path_matches_trajectory(small_returns):
 
 def test_smoothing_bias_is_non_negative(small_returns):
     """Huber understates |d|, so the exact objective can only exceed the smoothed one."""
-    n = len(small_returns.columns)
+    n = _n(small_returns)
     res = mp(small_returns, horizon=4, w_prev=_w_prev(n), costs=TradingCosts(spread_bps=25.0))
     assert res.metadata["smoothing_bias"] >= -1e-12, res.metadata["smoothing_bias"]
 
@@ -184,7 +188,7 @@ def test_smoothing_bias_is_non_negative(small_returns):
 def test_zero_cost_reduces_to_single_period(returns, costs):
     """Frictionless ⇒ every period holds the single-period mean-variance optimum."""
     mu, cov = _moments(returns)
-    n = len(returns.columns)
+    n = _n(returns)
     w_sp = C.mean_variance(returns, risk_aversion=GAMMA).weights
     res = mp(returns, horizon=5, w_prev=_w_prev(n), risk_aversion=GAMMA, costs=costs)
     u_sp = _utility(w_sp, mu, cov)
@@ -196,7 +200,7 @@ def test_zero_cost_reduces_to_single_period(returns, costs):
 
 def test_prohibitive_cost_pins_at_w_prev(returns):
     """If trading is ruinously expensive, the optimal path is to hold still."""
-    n = len(returns.columns)
+    n = _n(returns)
     wp = _w_prev(n)
     res = mp(returns, horizon=5, w_prev=wp, risk_aversion=GAMMA, costs=TradingCosts(spread_bps=1e6))
     assert np.allclose(res.trajectory, wp[None, :], atol=1e-3), (
@@ -212,7 +216,7 @@ def test_impact_cost_spreads_execution_monotonically(returns):
     fixed target is the standard no-trade-region result for convex separable
     costs, not a theorem for a time-varying ``mu_path``.
     """
-    n = len(returns.columns)
+    n = _n(returns)
     wp = _w_prev(n)
     res = mp(
         returns,
@@ -231,7 +235,7 @@ def test_impact_cost_spreads_execution_monotonically(returns):
 
 def test_impact_cost_trades_less_than_one_shot(returns):
     """The economic claim: total turnover is below the myopic single trade."""
-    n = len(returns.columns)
+    n = _n(returns)
     wp = _w_prev(n)
     w_sp = C.mean_variance(returns, risk_aversion=GAMMA).weights
     one_shot = float(np.abs(w_sp - wp).sum())
@@ -253,7 +257,7 @@ def test_higher_cost_monotonically_reduces_turnover(returns):
     at a full rebalance (turnover 2.0 from a single-name book), and consecutive
     settings then agree to a few 1e-6 rather than exactly.
     """
-    n = len(returns.columns)
+    n = _n(returns)
     wp = _w_prev(n)
     totals = [
         mp(
@@ -269,7 +273,7 @@ def test_higher_cost_monotonically_reduces_turnover(returns):
 
 def test_horizon_one_is_turnover_penalized(small_returns):
     """``horizon=1`` degenerates to a single-period solve with a trade penalty."""
-    n = len(small_returns.columns)
+    n = _n(small_returns)
     wp = _w_prev(n)
     res = mp(
         small_returns,
@@ -294,7 +298,7 @@ def test_w_prev_none_is_a_flat_book(small_returns):
     rebalance, and because it correctly charges the cost of *establishing* a
     position rather than claiming one you do not have.
     """
-    n = len(small_returns.columns)
+    n = _n(small_returns)
     res = mp(small_returns, horizon=3, costs=TradingCosts(spread_bps=10.0))
     assert res.metadata["w_prev"] == [0.0] * n
     explicit = mp(small_returns, horizon=3, w_prev=np.zeros(n), costs=TradingCosts(spread_bps=10.0))
@@ -303,7 +307,7 @@ def test_w_prev_none_is_a_flat_book(small_returns):
 
 def test_costless_result_is_independent_of_w_prev(small_returns):
     """With no frictions the problem has no memory, so holdings cannot matter."""
-    n = len(small_returns.columns)
+    n = _n(small_returns)
     a = mp(small_returns, horizon=3, w_prev=np.zeros(n), risk_aversion=GAMMA)
     b = mp(small_returns, horizon=3, w_prev=_w_prev(n), risk_aversion=GAMMA)
     assert np.allclose(a.trajectory, b.trajectory, atol=1e-4), (
@@ -313,7 +317,7 @@ def test_costless_result_is_independent_of_w_prev(small_returns):
 
 def test_w_prev_need_not_sum_to_one(small_returns):
     """The engine hands over a drifted, possibly partial book — accept it."""
-    n = len(small_returns.columns)
+    n = _n(small_returns)
     partial = np.zeros(n)
     partial[0], partial[1] = 0.3, 0.1
     res = mp(small_returns, horizon=3, w_prev=partial, costs=TradingCosts(spread_bps=10.0))
@@ -322,7 +326,7 @@ def test_w_prev_need_not_sum_to_one(small_returns):
 
 
 def test_w_prev_length_is_validated(small_returns):
-    n = len(small_returns.columns)
+    n = _n(small_returns)
     with pytest.raises(ValueError, match=rf"expected {n}"):
         mp(small_returns, horizon=2, w_prev=np.zeros(n + 1))
 
@@ -331,7 +335,7 @@ def test_w_prev_length_is_validated(small_returns):
 # Forecast term structure
 # --------------------------------------------------------------------------- #
 def test_mu_path_shape_validation(small_returns):
-    n = len(small_returns.columns)
+    n = _n(small_returns)
     with pytest.raises(ValueError, match=rf"mu_path shape \(3, {n}\).*expected \(5, {n}\)"):
         mp(small_returns, horizon=5, mu_path=np.zeros((3, n)))
     with pytest.raises(ValueError, match=rf"cov_path shape \(5, {n}, {n + 1}\)"):
@@ -354,7 +358,7 @@ def test_mu_path_is_consumed_per_period(small_returns):
 
 def test_cov_path_matches_shared_cov_when_tiled(small_returns):
     """A tiled per-period covariance must reproduce the shared-covariance answer."""
-    n = len(small_returns.columns)
+    n = _n(small_returns)
     _, cov = _moments(small_returns)
     shared = mp(
         small_returns,

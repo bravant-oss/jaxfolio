@@ -32,7 +32,7 @@ def _exposure(weights, assets, members) -> float:
 
 def main() -> None:
     returns = jf.generate_returns(n_assets=9, n_days=500, seed=42)
-    assets = list(returns.columns)
+    assets = jf.asset_columns(returns)
 
     free = jf.minimum_variance(returns)
 
@@ -99,7 +99,7 @@ def main() -> None:
     report = jf.explain(detailed)
     print(report.explain_text(top_n=6))
 
-    print("\n" + report.constraints_frame().to_string())
+    print("\n", report.constraints_frame())
     print(
         "\nA zero multiplier on a slack row is exact, not a rounding artifact.\n"
         "'unidentified' means every member of the row sits on a bound, so the split\n"

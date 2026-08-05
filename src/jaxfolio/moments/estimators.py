@@ -1,7 +1,7 @@
 """Moment estimators (mean & covariance) implemented in JAX.
 
 Every estimator takes a ``(T, N)`` return array and returns JAX arrays, so the
-downstream optimizers can jit through the whole pipeline. Inputs may be pandas
+downstream optimizers can jit through the whole pipeline. Inputs may be Polars
 frames or numpy arrays; :func:`as_matrix` normalizes them.
 """
 
@@ -9,20 +9,27 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
-import pandas as pd
+import polars as pl
 
 Array = jnp.ndarray
 
 
-def as_matrix(returns: pd.DataFrame | np.ndarray | Array) -> tuple[Array, list[str]]:
+def as_matrix(returns: pl.DataFrame | np.ndarray | Array) -> tuple[Array, list[str]]:
     """Return ``(matrix, asset_names)`` from a returns object.
 
-    Accepts a pandas DataFrame (columns become asset names), or a raw array
-    (names default to ``asset_0``...). NaNs are replaced with zeros.
+    Accepts a Polars DataFrame (numeric columns become asset names), or a raw
+    array (names default to ``asset_0``...). Date/datetime columns are metadata
+    and are excluded from the optimizer matrix. Nulls and NaNs become zeros.
     """
-    if isinstance(returns, pd.DataFrame):
-        names = [str(c) for c in returns.columns]
-        mat = jnp.asarray(returns.to_numpy(dtype=float))
+    if isinstance(returns, pl.DataFrame):
+        names = [
+            name
+            for name, dtype in returns.schema.items()
+            if dtype.is_numeric() and dtype != pl.Boolean
+        ]
+        if not names:
+            raise ValueError("returns must contain at least one numeric asset column")
+        mat = jnp.asarray(returns.select(names).fill_null(0.0).to_numpy(), dtype=float)
     else:
         mat = jnp.asarray(np.asarray(returns, dtype=float))
         if mat.ndim != 2:

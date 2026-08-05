@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
+import polars as pl
 import pytest
 
 import jaxfolio as jf
 from jaxfolio.backtest import metrics as M
 from jaxfolio.llm import FakeLLM, llm_views
 from jaxfolio.llm.client import parse_json
-from jaxfolio.moments.estimators import ledoit_wolf_covariance, sample_covariance
+from jaxfolio.moments.estimators import as_matrix, ledoit_wolf_covariance, sample_covariance
 from jaxfolio.options import black_scholes_price, chain_greeks, implied_volatility, price_call_chain
 from jaxfolio.types import OptimizerConfig
 
@@ -18,8 +19,7 @@ from jaxfolio.types import OptimizerConfig
 @pytest.fixture
 def zero_var_returns():
     r = jf.generate_returns(n_assets=4, n_days=300, seed=1)
-    r.iloc[:, 0] = 0.0  # a constant, zero-variance column
-    return r
+    return r.with_columns(pl.lit(0.0).alias(jf.asset_columns(r)[0]))
 
 
 # --- degenerate covariance / optimizers ------------------------------------ #
@@ -30,7 +30,7 @@ def test_sample_covariance_requires_two_rows():
 
 def test_ledoit_wolf_single_asset_no_nan():
     r = jf.generate_returns(n_assets=1, n_days=200, seed=0)
-    cov, shrink = ledoit_wolf_covariance(jnp.asarray(r.to_numpy()))
+    cov, shrink = ledoit_wolf_covariance(as_matrix(r)[0])
     assert not np.isnan(np.asarray(cov)).any()
     assert 0.0 <= shrink <= 1.0
 
@@ -48,7 +48,7 @@ def test_risk_parity_zero_variance(zero_var_returns):
 
 
 def test_black_litterman_zero_variance_view(zero_var_returns):
-    assets = list(zero_var_returns.columns)
+    assets = jf.asset_columns(zero_var_returns)
     res = jf.black_litterman(zero_var_returns, views={assets[0]: 0.01})
     assert not np.isnan(res.weights).any()
     assert np.isclose(res.weights.sum(), 1.0, atol=1e-4)
@@ -56,7 +56,7 @@ def test_black_litterman_zero_variance_view(zero_var_returns):
 
 def test_black_litterman_zero_confidence_no_div_by_zero():
     r = jf.generate_returns(n_assets=5, seed=2)
-    res = jf.black_litterman(r, views={r.columns[0]: 0.002}, view_confidence=0.0)
+    res = jf.black_litterman(r, views={jf.asset_columns(r)[0]: 0.002}, view_confidence=0.0)
     assert not np.isnan(res.weights).any()
 
 
@@ -103,7 +103,8 @@ def test_config_stays_hashable():
 def test_long_short_config_permits_negative_weights():
     # A strongly negative-drift asset should be shortable when long_only=False.
     r = jf.generate_returns(n_assets=5, seed=9, mean_annual_return=0.0)
-    r.iloc[:, 0] -= 0.03
+    asset = jf.asset_columns(r)[0]
+    r = r.with_columns((pl.col(asset) - 0.03).alias(asset))
     res = jf.mean_variance(r, risk_aversion=5.0, config=OptimizerConfig(long_only=False))
     assert np.isclose(res.weights.sum(), 1.0, atol=1e-3)
     # bounds allow it (the projection is box-budget, not simplex)
@@ -170,7 +171,8 @@ def test_confidence_single_asset_tight_agreement_high():
     import json
 
     r = jf.generate_returns(n_assets=1, n_days=200, seed=0)
-    llm = FakeLLM([json.dumps({r.columns[0]: v}) for v in (0.010, 0.011, 0.012, 0.0105, 0.0115)])
+    asset = jf.asset_columns(r)[0]
+    llm = FakeLLM([json.dumps({asset: v}) for v in (0.010, 0.011, 0.012, 0.0105, 0.0115)])
     vs = llm_views(r, llm, samples=5)
     assert vs.confidence > 0.5  # tight agreement -> high confidence, not the 0.05 floor
 
