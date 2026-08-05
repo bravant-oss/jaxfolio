@@ -7,14 +7,21 @@ floats. Annualization uses ``periods_per_year`` (252 for daily by default).
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
 _PPY = 252
 
 
 def _to_array(returns) -> np.ndarray:
-    if isinstance(returns, pd.Series | pd.DataFrame):
+    if isinstance(returns, pl.Series):
         returns = returns.to_numpy()
+    elif isinstance(returns, pl.DataFrame):
+        numeric = [
+            name
+            for name, dtype in returns.schema.items()
+            if dtype.is_numeric() and dtype != pl.Boolean
+        ]
+        returns = returns.select(numeric).to_numpy()
     return np.asarray(returns, dtype=float).reshape(-1)
 
 

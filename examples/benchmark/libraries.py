@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
 PROBLEMS = ("min_variance", "max_sharpe", "risk_parity")
 
@@ -32,7 +32,7 @@ class Unsupported(Exception):
 class Context:
     """Everything an adapter needs to solve, precomputed once per dataset."""
 
-    returns: pd.DataFrame  # (T x N) simple returns
+    returns: pl.DataFrame  # explicit date + (T x N) simple returns
     assets: list[str]  # column order every adapter must align to
     mu: np.ndarray  # (N,) per-period sample mean
     cov: np.ndarray  # (N, N) per-period sample covariance (ddof=1)
@@ -42,17 +42,29 @@ class Context:
     def n(self) -> int:
         return len(self.assets)
 
-    def mu_series(self) -> pd.Series:
+    def mu_series(self):
+        import pandas as pd
+
         return pd.Series(self.mu, index=self.assets)
 
-    def cov_frame(self) -> pd.DataFrame:
+    def cov_frame(self):
+        import pandas as pd
+
         return pd.DataFrame(self.cov, index=self.assets, columns=self.assets)
 
+    def provider_frame(self):
+        """Legacy frame required by third-party benchmark competitors."""
+        import pandas as pd
 
-def make_context(returns: pd.DataFrame, risk_free: float = 0.0) -> Context:
+        return pd.DataFrame(self.returns.select(self.assets).to_numpy(), columns=self.assets)
+
+
+def make_context(returns: pl.DataFrame, risk_free: float = 0.0) -> Context:
     """Build a :class:`Context` with moments that match jaxfolio's estimators."""
-    assets = [str(c) for c in returns.columns]
-    mat = returns.to_numpy(dtype=float)
+    assets = [
+        name for name, dtype in returns.schema.items() if dtype.is_numeric() and dtype != pl.Boolean
+    ]
+    mat = returns.select(assets).to_numpy()
     mu = mat.mean(axis=0)
     cov = np.cov(mat, rowvar=False, ddof=1)
     return Context(returns=returns, assets=assets, mu=mu, cov=cov, risk_free=risk_free)
@@ -191,8 +203,8 @@ class PyPortfolioOptAdapter(Adapter):
         else:  # pragma: no cover
             raise Unsupported(problem)
         # ef.weights is a positional numpy array aligned to ef.tickers.
-        w = pd.Series(ef.weights, index=list(ef.tickers)).reindex(ctx.assets).to_numpy(dtype=float)
-        return _normalize(w)
+        by_asset = dict(zip(ef.tickers, ef.weights, strict=True))
+        return _normalize(np.array([by_asset[a] for a in ctx.assets], dtype=float))
 
 
 # --------------------------------------------------------------------------- #
@@ -211,9 +223,10 @@ class RiskfolioAdapter(Adapter):
             return False
 
     def _portfolio(self, ctx: Context):
+        import pandas as pd
         import riskfolio as rp
 
-        port = rp.Portfolio(returns=ctx.returns)
+        port = rp.Portfolio(returns=ctx.provider_frame())
         port.assets_stats(method_mu="hist", method_cov="hist")
         # Override with the shared moments so the comparison is apples-to-apples.
         port.mu = pd.DataFrame(ctx.mu.reshape(1, -1), columns=ctx.assets)
@@ -274,11 +287,11 @@ class SkfolioAdapter(Adapter):
         else:  # pragma: no cover
             raise Unsupported(problem)
 
-        model.fit(ctx.returns)
+        model.fit(ctx.provider_frame())
         # skfolio keeps the fitted feature (asset) order; realign defensively.
         cols = list(getattr(model, "feature_names_in_", ctx.assets))
-        w = pd.Series(np.asarray(model.weights_, dtype=float), index=cols)
-        return _normalize(w.reindex(ctx.assets).to_numpy(dtype=float))
+        by_asset = dict(zip(cols, np.asarray(model.weights_, dtype=float), strict=True))
+        return _normalize(np.array([by_asset[a] for a in ctx.assets], dtype=float))
 
 
 # --------------------------------------------------------------------------- #

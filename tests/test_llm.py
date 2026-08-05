@@ -29,7 +29,7 @@ from jaxfolio.llm.client import OllamaClient
 @pytest.fixture
 def universe():
     r = jf.generate_returns(n_assets=5, n_days=300, seed=5)
-    return r, list(r.columns)
+    return r, jf.asset_columns(r)
 
 
 def _views_responder(assets, mu=0.01, sd=0.004):

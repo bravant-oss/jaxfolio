@@ -669,7 +669,7 @@ def test_jit_cache_grows_only_on_structural_change():
     from jaxfolio.optimizers.base import _solve_cached
 
     rets = generate_returns(n_assets=6, n_days=200, seed=3)
-    names = list(rets.columns)
+    names = jf.asset_columns(rets)
 
     jf.minimum_variance(rets)
     base = _solve_cached._cache_size()
@@ -710,7 +710,7 @@ def panel():
 def test_group_cap_binds_through_every_solver_based_optimizer(panel, method):
     import jaxfolio as jf
 
-    names = list(panel.columns)
+    names = jf.asset_columns(panel)
     fn = getattr(jf, method)
     capped = fn(panel, constraints=[GroupCap("tech", names[:3], max=0.30)])
     got = float(capped.weights[:3].sum())
@@ -722,7 +722,7 @@ def test_group_cap_binds_through_min_cvar(panel):
     """The packed ``[w, tau]`` optimizer must honor the cap on its weight block."""
     import jaxfolio as jf
 
-    names = list(panel.columns)
+    names = jf.asset_columns(panel)
     res = jf.min_cvar(panel, constraints=[GroupCap("tech", names[:3], max=0.30)])
     assert float(res.weights[:3].sum()) <= 0.30 + 1e-4, f"tech={res.weights[:3].sum():.4f}"
     assert np.isclose(res.weights.sum(), 1.0, atol=1e-4)
@@ -738,7 +738,7 @@ def test_per_asset_cap_binds(panel):
 def test_group_floor_binds(panel):
     import jaxfolio as jf
 
-    names = list(panel.columns)
+    names = jf.asset_columns(panel)
     res = jf.minimum_variance(panel, constraints=[GroupFloor("energy", names[4:], min=0.40)])
     assert float(res.weights[4:].sum()) >= 0.40 - 1e-4, f"energy={res.weights[4:].sum():.4f}"
 
@@ -746,7 +746,7 @@ def test_group_floor_binds(panel):
 def test_constraints_may_come_from_the_config_or_the_keyword_but_not_both(panel):
     import jaxfolio as jf
 
-    names = list(panel.columns)
+    names = jf.asset_columns(panel)
     cons = [GroupCap("tech", names[:3], max=0.20)]
     via_kwarg = jf.minimum_variance(panel, constraints=cons)
     via_config = jf.minimum_variance(panel, jf.OptimizerConfig(constraints=cons))
@@ -759,7 +759,7 @@ def test_closed_form_optimizers_reject_constraints_rather_than_ignore_them(panel
     """Silently returning weights that violate a cap would be the worst outcome."""
     import jaxfolio as jf
 
-    names = list(panel.columns)
+    names = jf.asset_columns(panel)
     cons = [GroupCap("tech", names[:3], max=0.20)]
     with pytest.raises(NotImplementedError, match="closed-form weighting"):
         jf.risk_parity(panel, constraints=cons)
@@ -770,7 +770,7 @@ def test_closed_form_optimizers_reject_constraints_rather_than_ignore_them(panel
 def test_custom_strategy_inherits_named_constraints(panel):
     import jaxfolio as jf
 
-    names = list(panel.columns)
+    names = jf.asset_columns(panel)
     cfg = jf.OptimizerConfig(constraints=[GroupCap("tech", names[:3], max=0.25)])
     strategy = jf.CustomStrategy.from_objective(
         "constrained minvar", lambda w, ctx: w @ ctx.cov @ w, config=cfg

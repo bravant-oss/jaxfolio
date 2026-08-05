@@ -9,14 +9,14 @@ finite, and match the reference objective where the optimum is well defined.
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
 from jaxfolio.optimizers import classical as C
 
 from . import references as ref
 
 
-def _collinear_returns(n_assets: int = 5, n_days: int = 500, *, seed: int = 0) -> pd.DataFrame:
+def _collinear_returns(n_assets: int = 5, n_days: int = 500, *, seed: int = 0) -> pl.DataFrame:
     """A near-singular return panel: assets share a common factor with tiny idio.
 
     The resulting sample covariance has a very high condition number, so the
@@ -26,7 +26,7 @@ def _collinear_returns(n_assets: int = 5, n_days: int = 500, *, seed: int = 0) -
     rng = np.random.default_rng(seed)
     factor = rng.standard_normal(n_days) * 0.01
     cols = {f"A{i}": factor + rng.standard_normal(n_days) * 1e-4 for i in range(n_assets)}
-    return pd.DataFrame(cols)
+    return pl.DataFrame(cols)
 
 
 def test_ill_conditioned_covariance_is_high_condition_number():
@@ -69,8 +69,7 @@ def test_single_asset_degenerate():
 def test_zero_variance_asset_handled():
     """An asset with constant (zero-variance) returns must not produce NaNs."""
     returns = _collinear_returns(n_assets=4, n_days=400)
-    returns = returns.copy()
-    returns["CASH"] = 0.0  # a riskless, zero-variance column
+    returns = returns.with_columns(pl.lit(0.0).alias("CASH"))
     for method in (C.minimum_variance, C.risk_parity, C.inverse_volatility):
         w = method(returns).weights
         assert np.all(np.isfinite(w)), f"{method.__name__} produced non-finite weights"

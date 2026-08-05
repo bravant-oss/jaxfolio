@@ -11,6 +11,11 @@ This file is generated with [git-cliff](https://git-cliff.org) from
 
 ### Features
 
+- **Polars-native data model** — core inputs, loaders, synthetic data, backtest
+  outputs, metrics tables, and attribution frames now use Polars. Time is an
+  explicit `date` column rather than a hidden index; `jf.asset_columns(frame)`
+  returns the investable numeric columns, and optimizer matrix conversion ignores
+  temporal columns automatically. Pandas is no longer a core dependency.
 - **Explainable optimization** — `jf.explain(result)` reports which constraints
   bind, what each one costs, and *why* each asset holds the weight it does. A 0%
   allocation now comes with an attribution: "excluded on its own merits" versus
@@ -48,7 +53,7 @@ This file is generated with [git-cliff](https://git-cliff.org) from
   Capturing the diagnostics never perturbs the weights — asserted bit-identical.
   A report renders five ways, for five readers: `explain_text()` as prose,
   `to_table()` as a printed report (header block, constraints table, assets table,
-  notes), `to_dict()` / `to_json()` serialized whole, the pandas frames, and the
+  notes), `to_dict()` / `to_json()` serialized whole, the Polars frames, and the
   `metadata` digest. `to_table()` folds every string *jaxfolio* wrote to ASCII — the
   reasons and warnings are written for the guide and arrive full of em dashes, while a
   printed report has to survive a log file, a CI artifact and a non-UTF-8 console. The

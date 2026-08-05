@@ -110,7 +110,7 @@ also lands in `result.metadata`, JSON-serializable, for consumers that never cal
 | `dual_quality` | `exact` / `approximate` / `unreliable`. See below. |
 | `n_binding_constraints`, `binding_constraints` | Which named rows are actually moving the optimum. |
 
-Per-constraint and per-asset views come back as pandas frames:
+Per-constraint and per-asset views come back as Polars frames:
 
 ```python
 report = jf.explain(res)
@@ -138,7 +138,7 @@ The same fields, formatted for whoever is reading. None of them recompute anythi
 | `explain_text(top_n=…)` | prose — reading *one* asset's story |
 | `to_table(max_assets=…, notes=…)` | a printed report: header block, constraints table, assets table, notes |
 | `to_json(indent=…)` / `to_dict()` | a machine — the whole report, serialized |
-| `to_frame()` / `constraints_frame()` | pandas — sorting, filtering, joining |
+| `to_frame()` / `constraints_frame()` | Polars — sorting, filtering, joining |
 | `result.metadata` | a backtest log — the five-key digest, always present |
 
 `to_table()` is the one to print. Every string **jaxfolio wrote** is folded to ASCII on

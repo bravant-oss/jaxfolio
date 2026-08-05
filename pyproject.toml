@@ -41,7 +41,7 @@ dependencies = [
     "jaxlib>=0.4.28",
     "optax>=0.2.2",
     "numpy>=1.26",
-    "pandas>=2.1",
+    "polars>=1.0",
     "scipy>=1.11",
     "matplotlib>=3.8",
 ]
@@ -52,6 +52,9 @@ llm = ["requests>=2.31"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
+    # Test suite is ~375 mostly-independent JAX tests with no single hotspot, so
+    # it parallelizes almost linearly: `-n auto` cuts CI's slowest leg ~2.5x.
+    "pytest-xdist>=3.5",
     # Upper bound on purpose: the formatter is a CI gate, and a new minor can
     # reformat code it previously left alone (0.16 did, for Markdown fences).
     # `uv.lock` is not committed, so CI resolves this range fresh on every run.
@@ -111,7 +114,7 @@ known-first-party = ["jaxfolio"]
 testpaths = ["tests"]
 addopts = "-q"
 filterwarnings = [
-    # Ignore third-party DeprecationWarnings (jax/pandas/etc. churn a lot)...
+    # Ignore third-party DeprecationWarnings (jax/polars/etc. churn a lot)...
     "ignore::DeprecationWarning",
     # ...but turn *our own* deprecations into errors so internal callers can
     # never silently depend on a deprecated path (see _deprecation.py).

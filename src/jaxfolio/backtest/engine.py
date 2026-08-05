@@ -25,12 +25,13 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
 from jaxfolio.backtest import metrics as M
+from jaxfolio.data.returns import asset_columns, date_column
 from jaxfolio.types import PortfolioResult
 
-Optimizer = Callable[[pd.DataFrame], PortfolioResult]
+Optimizer = Callable[[pl.DataFrame], PortfolioResult]
 """The minimum optimizer contract: a trailing return window in, a result out.
 
 A callable may additionally declare a keyword-only ``w_prev`` parameter, which
@@ -47,22 +48,32 @@ class BacktestResult:
     """Output of a backtest run."""
 
     name: str
-    returns: pd.Series
-    weights: pd.DataFrame
-    turnover: pd.Series
+    returns: pl.DataFrame
+    weights: pl.DataFrame
+    turnover: pl.DataFrame
     metrics: dict[str, float] = field(default_factory=dict)
 
     @property
-    def equity_curve(self) -> pd.Series:
-        return pd.Series(M.cumulative_returns(self.returns), index=self.returns.index)
+    def equity_curve(self) -> pl.DataFrame:
+        date_col = date_column(self.returns)
+        values = self.returns.get_column(self.name)
+        data = {"equity": M.cumulative_returns(values)}
+        if date_col:
+            data = {date_col: self.returns.get_column(date_col), **data}
+        return pl.DataFrame(data)
 
     @property
-    def drawdown(self) -> pd.Series:
-        return pd.Series(M.drawdown_series(self.returns), index=self.returns.index)
+    def drawdown(self) -> pl.DataFrame:
+        date_col = date_column(self.returns)
+        values = self.returns.get_column(self.name)
+        data = {"drawdown": M.drawdown_series(values)}
+        if date_col:
+            data = {date_col: self.returns.get_column(date_col), **data}
+        return pl.DataFrame(data)
 
 
 def backtest(
-    returns: pd.DataFrame,
+    returns: pl.DataFrame,
     optimizer: Optimizer,
     *,
     name: str | None = None,
@@ -116,14 +127,15 @@ def backtest(
     ``metadata["turnover_path"]``: the plan assumes no drift, whereas the engine
     lets weights drift with returns and then trades from the drifted book.
     """
-    assets = list(returns.columns)
+    assets = asset_columns(returns)
     n = len(assets)
-    dates = returns.index
-    ret_vals = returns.to_numpy()
+    date_col = date_column(returns)
+    dates = returns.get_column(date_col).to_list() if date_col else list(range(returns.height))
+    ret_vals = returns.select(assets).to_numpy()
 
     weights = np.zeros(n)
-    weight_hist: dict[pd.Timestamp, np.ndarray] = {}
-    turnover_hist: dict[pd.Timestamp, float] = {}
+    weight_hist: dict[object, np.ndarray] = {}
+    turnover_hist: dict[object, float] = {}
     strat_returns = np.zeros(len(returns))
     total_cost = 0.0
 
@@ -136,7 +148,7 @@ def backtest(
 
         # Rebalance at the cadence; otherwise execute a planned step, else drift.
         if (t - lookback) % rebalance_every == 0:
-            window = returns.iloc[t - lookback : t]
+            window = returns.slice(t - lookback, lookback)
             result = (
                 optimizer(window, w_prev=weights.copy()) if pass_holdings else optimizer(window)
             )
@@ -176,16 +188,31 @@ def backtest(
         if total > 0:
             weights = grown / total
 
-    ret_series = pd.Series(strat_returns, index=dates, name=name or "strategy")
-    ret_series = ret_series.iloc[lookback:]
-    w_df = pd.DataFrame.from_dict(weight_hist, orient="index", columns=assets)
-    to_series = pd.Series(turnover_hist, name="turnover")
+    result_name = name or "strategy"
+    result_dates = dates[lookback:]
+    ret_data = {result_name: strat_returns[lookback:]}
+    if date_col:
+        ret_data = {date_col: result_dates, **ret_data}
+    ret_series = pl.DataFrame(ret_data)
+    hist_dates = list(weight_hist)
+    hist_values = np.vstack(list(weight_hist.values())) if weight_hist else np.empty((0, n))
+    weight_data = dict(zip(assets, hist_values.T, strict=True))
+    if date_col:
+        weight_data = {date_col: hist_dates, **weight_data}
+    w_df = pl.DataFrame(weight_data)
+    turn_dates = list(turnover_hist)
+    turn_data = {"turnover": list(turnover_hist.values())}
+    if date_col:
+        turn_data = {date_col: turn_dates, **turn_data}
+    to_series = pl.DataFrame(turn_data)
 
     summary = M.summary(ret_series, risk_free=risk_free, periods_per_year=periods_per_year)
-    summary["avg_turnover"] = float(to_series.mean()) if len(to_series) else 0.0
+    summary["avg_turnover"] = (
+        float(to_series.get_column("turnover").mean()) if len(to_series) else 0.0
+    )
     summary["total_cost"] = float(total_cost)
     return BacktestResult(
-        name=name or "strategy",
+        name=result_name,
         returns=ret_series,
         weights=w_df,
         turnover=to_series,
@@ -194,7 +221,7 @@ def backtest(
 
 
 def compare(
-    returns: pd.DataFrame,
+    returns: pl.DataFrame,
     optimizers: dict[str, Optimizer],
     **kwargs,
 ) -> dict[str, BacktestResult]:
@@ -202,10 +229,9 @@ def compare(
     return {name: backtest(returns, opt, name=name, **kwargs) for name, opt in optimizers.items()}
 
 
-def metrics_table(results: dict[str, BacktestResult]) -> pd.DataFrame:
+def metrics_table(results: dict[str, BacktestResult]) -> pl.DataFrame:
     """Assemble a tidy metrics comparison table across backtest results."""
-    rows = {name: res.metrics for name, res in results.items()}
-    return pd.DataFrame(rows).T
+    return pl.DataFrame([{"strategy": name, **res.metrics} for name, res in results.items()])
 
 
 def _align_weights(result: PortfolioResult, assets: list[str]) -> np.ndarray:

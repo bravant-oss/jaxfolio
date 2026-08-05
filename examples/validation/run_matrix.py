@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
+import polars as pl
 import scipy.optimize as opt
 
 from jaxfolio.data.synthetic import generate_returns
@@ -56,7 +56,7 @@ def _slsqp(objective, n):
 def _collinear_returns(n_assets=5, n_days=500, seed=0):
     rng = np.random.default_rng(seed)
     factor = rng.standard_normal(n_days) * 0.01
-    return pd.DataFrame(
+    return pl.DataFrame(
         {f"A{i}": factor + rng.standard_normal(n_days) * 1e-4 for i in range(n_assets)}
     )
 

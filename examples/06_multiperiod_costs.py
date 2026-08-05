@@ -14,7 +14,7 @@ from functools import partial
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
 import jaxfolio as jf
 from jaxfolio import viz
@@ -30,7 +30,7 @@ IMPACT_BPS = 100.0
 
 def main() -> None:
     returns = jf.generate_returns(n_assets=8, n_days=500, seed=42)
-    assets = list(returns.columns)
+    assets = jf.asset_columns(returns)
     n = len(assets)
 
     # A deliberately awkward starting book: everything in the single name the
@@ -58,17 +58,18 @@ def main() -> None:
         costs=jf.TradingCosts(spread_bps=10.0, impact_bps=IMPACT_BPS),
     )
 
-    path = pd.DataFrame(
-        res.trajectory,
-        index=[f"period {t + 1}" for t in range(HORIZON)],
-        columns=assets,
+    path = (
+        pl.DataFrame(dict(zip(assets, res.trajectory.T, strict=True)))
+        .with_columns(pl.Series("period", [f"period {t + 1}" for t in range(HORIZON)]))
+        .select("period", *assets)
     )
     print("\nPlanned weight path:")
-    print(path.round(4).to_string())
+    print(path.select("period", pl.col(assets).round(4)))
     print(f"\nTrade size per period: {np.round(res.metadata['turnover_path'], 4).tolist()}")
     print(f"Total planned turnover: {res.metadata['total_turnover']:.4f}")
     print(f"Cost of the whole plan: {res.metadata['total_cost'] * 1e4:.2f} bps of NAV")
-    print("\nweights == row 0 (what to trade into today):", np.allclose(res.weights, path.iloc[0]))
+    first_row_matches = np.allclose(res.weights, path.select(assets).row(0))
+    print("\nweights == row 0 (what to trade into today):", first_row_matches)
     print("terminal (long-run) target:", np.round(res.metadata["terminal_weights"], 4).tolist())
     print(f"smoothing bias: {res.metadata['smoothing_bias']:.3e} (audits the L1 surrogate)")
 
@@ -120,7 +121,10 @@ def main() -> None:
     )
     table = metrics_table(results)
     print()
-    print(table[["annual_return", "sharpe", "avg_turnover", "total_cost"]].round(4).to_string())
+    summary = table.select(
+        "strategy", "annual_return", "sharpe", "avg_turnover", "total_cost"
+    ).with_columns(pl.exclude("strategy").round(4))
+    print(summary)
 
     drag = results["myopic"].metrics["total_cost"] - results["multi-period"].metrics["total_cost"]
     print(f"\nCost drag avoided: {drag:.4f} ({drag * 1e4:.0f} bps of cumulative NAV)")

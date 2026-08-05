@@ -10,7 +10,7 @@ surface). Colors are drawn from the validated dark palette in :mod:`.theme`.
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
+import polars as pl
 from matplotlib import dates as mdates
 from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
@@ -19,6 +19,16 @@ from matplotlib.patches import FancyBboxPatch, Rectangle
 from jaxfolio.viz import theme
 
 theme.use_dark_theme()
+
+
+def _frame_xy(frame: pl.DataFrame, value: str) -> tuple[np.ndarray, np.ndarray]:
+    """Extract an explicit temporal x column (or row numbers) and one value."""
+    temporal = next(
+        (name for name, dtype in frame.schema.items() if dtype.is_temporal()),
+        None,
+    )
+    x = frame.get_column(temporal).to_numpy() if temporal else np.arange(frame.height)
+    return x, frame.get_column(value).to_numpy()
 
 
 def _fig(ax_w: float = 9.0, ax_h: float = 5.5) -> tuple[Figure, plt.Axes]:
@@ -223,7 +233,7 @@ def plot_weights(result, *, top_n: int = 15, title: str | None = None) -> Figure
 
 
 def plot_efficient_frontier(
-    returns: pd.DataFrame,
+    returns: pl.DataFrame,
     *,
     n_portfolios: int = 4000,
     highlight: dict[str, object] | None = None,
@@ -289,11 +299,12 @@ def plot_equity_curves(results: dict, *, log_scale: bool = False) -> Figure:
     fig, ax = _fig(10, 5.5)
     for i, (name, res) in enumerate(results.items()):
         curve = res.equity_curve
+        x, y = _frame_xy(curve, "equity")
         c = theme.color(i)
-        ax.plot(curve.index, curve.values, color=c, label=name)
+        ax.plot(x, y, color=c, label=name)
         ax.text(
-            curve.index[-1],
-            curve.values[-1],
+            x[-1],
+            y[-1],
             f"  {name}",
             color=c,
             va="center",
@@ -315,8 +326,9 @@ def plot_drawdown(results: dict) -> Figure:
     fig, ax = _fig(10, 4.0)
     for i, (name, res) in enumerate(results.items()):
         dd = res.drawdown
-        ax.fill_between(dd.index, dd.values, 0.0, color=theme.color(i), alpha=0.25)
-        ax.plot(dd.index, dd.values, color=theme.color(i), label=name, linewidth=1.5)
+        x, y = _frame_xy(dd, "drawdown")
+        ax.fill_between(x, y, 0.0, color=theme.color(i), alpha=0.25)
+        ax.plot(x, y, color=theme.color(i), label=name, linewidth=1.5)
     ax.set_title("Drawdown", pad=12)
     ax.set_ylabel("Drawdown")
     ax.legend(loc="lower left")
@@ -331,14 +343,16 @@ def plot_weight_evolution(result_or_weights) -> Figure:
     Accepts a :class:`BacktestResult` or a weights DataFrame (dates x assets).
     """
     weights = getattr(result_or_weights, "weights", result_or_weights)
-    weights = weights.clip(lower=0.0)  # stacked area needs non-negative bands
+    temporal = next((name for name, dtype in weights.schema.items() if dtype.is_temporal()), None)
+    cols = [c for c in weights.columns if c != temporal]
+    weights = weights.with_columns(pl.col(cols).clip(lower_bound=0.0))
 
     fig, ax = _fig(10, 5.5)
-    cols = weights.columns
     colors = [theme.color(i) for i in range(len(cols))]
+    x = weights.get_column(temporal).to_numpy() if temporal else np.arange(weights.height)
     ax.stackplot(
-        weights.index,
-        *[weights[c].to_numpy() for c in cols],
+        x,
+        *[weights.get_column(c).to_numpy() for c in cols],
         labels=list(cols),
         colors=colors,
         edgecolor=theme.SURFACE,
@@ -380,7 +394,7 @@ def plot_risk_contributions(result) -> Figure:
     return fig
 
 
-def plot_correlation_network(returns: pd.DataFrame, *, threshold: float = 0.4) -> Figure:
+def plot_correlation_network(returns: pl.DataFrame, *, threshold: float = 0.4) -> Figure:
     """Force-directed-style correlation network via the minimum spanning tree.
 
     Nodes are assets placed on a circle; edges are the MST of the correlation
@@ -488,7 +502,7 @@ def plot_dendrogram(result) -> Figure:
     return fig
 
 
-def plot_correlation_heatmap(returns: pd.DataFrame, *, order: list[int] | None = None) -> Figure:
+def plot_correlation_heatmap(returns: pl.DataFrame, *, order: list[int] | None = None) -> Figure:
     """Clustered correlation heatmap (diverging blue↔red), optionally reordered."""
     from jaxfolio.moments.estimators import (
         as_matrix,
@@ -515,22 +529,23 @@ def plot_correlation_heatmap(returns: pd.DataFrame, *, order: list[int] | None =
     return fig
 
 
-def plot_metrics_table(metrics_df: pd.DataFrame) -> Figure:
+def plot_metrics_table(metrics_df: pl.DataFrame) -> Figure:
     """Render a metrics comparison table as a styled dark figure."""
-    fmt = metrics_df.copy()
-    pct_cols = [c for c in fmt.columns if c not in ("sharpe", "sortino", "calmar")]
-    for c in fmt.columns:
-        if c in pct_cols:
-            fmt[c] = fmt[c].map(lambda v: f"{v:.1%}")
-        else:
-            fmt[c] = fmt[c].map(lambda v: f"{v:.2f}")
+    row_key = "strategy" if "strategy" in metrics_df.columns else metrics_df.columns[0]
+    cols = [c for c in metrics_df.columns if c != row_key]
+    rows = metrics_df.get_column(row_key).cast(pl.String).to_list()
+    pct_cols = [c for c in cols if c not in ("sharpe", "sortino", "calmar")]
+    values = [
+        [f"{v:.1%}" if c in pct_cols else f"{v:.2f}" for c, v in zip(cols, row, strict=True)]
+        for row in metrics_df.select(cols).iter_rows()
+    ]
 
-    fig, ax = _fig(min(2 + 1.4 * len(fmt.columns), 16), 1.0 + 0.5 * len(fmt))
+    fig, ax = _fig(min(2 + 1.4 * len(cols), 16), 1.0 + 0.5 * len(metrics_df))
     ax.axis("off")
     tbl = ax.table(
-        cellText=fmt.values,
-        rowLabels=fmt.index,
-        colLabels=fmt.columns,
+        cellText=values,
+        rowLabels=rows,
+        colLabels=cols,
         loc="center",
         cellLoc="center",
     )
@@ -602,29 +617,31 @@ def plot_weight_path(result, *, top_n: int | None = None) -> Figure:
 
     # Prepend the starting book so the first trade is visible as a change.
     full = np.vstack([w_prev[None, :], path])
-    frame = pd.DataFrame(full, index=range(horizon + 1), columns=assets)
+    frame = pl.DataFrame(dict(zip(assets, full.T, strict=True))).with_row_index("period")
 
     if top_n is not None and top_n < len(assets):
-        rank = frame.abs().max().sort_values(ascending=False)
-        keep = list(rank.index[:top_n])
-        other = frame.drop(columns=keep).sum(axis=1)
-        frame = frame[keep]
-        frame["Other"] = other
+        peaks = {c: float(frame.get_column(c).abs().max()) for c in assets}
+        keep = sorted(assets, key=peaks.get, reverse=True)[:top_n]
+        dropped = [c for c in assets if c not in keep]
+        frame = frame.with_columns(
+            pl.sum_horizontal([pl.col(c) for c in dropped]).alias("Other")
+        ).select("period", *keep, "Other")
 
-    signed = bool((frame.to_numpy() < -1e-6).any())
+    cols = [c for c in frame.columns if c != "period"]
+    signed = bool((frame.select(cols).to_numpy() < -1e-6).any())
     fig, ax = _fig(10, 5.5)
-    cols = list(frame.columns)
+    x = frame.get_column("period").to_numpy()
 
     if signed:
         # Shorting present: a stack would misrepresent the exposures.
         for i, c in enumerate(cols):
-            ax.plot(frame.index, frame[c].to_numpy(), color=theme.color(i), label=c, linewidth=1.8)
+            ax.plot(x, frame.get_column(c).to_numpy(), color=theme.color(i), label=c, linewidth=1.8)
         ax.axhline(0.0, color=theme.BASELINE, linewidth=1.0)
         ax.set_ylabel("Weight (long / short)")
     else:
         ax.stackplot(
-            frame.index,
-            *[frame[c].to_numpy() for c in cols],
+            x,
+            *[frame.get_column(c).to_numpy() for c in cols],
             labels=cols,
             colors=[theme.color(i) for i in range(len(cols))],
             edgecolor=theme.SURFACE,
@@ -1118,7 +1135,7 @@ def plot_vol_surface(
     return fig
 
 
-def dashboard(results: dict, returns: pd.DataFrame, *, highlight: dict | None = None) -> Figure:
+def dashboard(results: dict, returns: pl.DataFrame, *, highlight: dict | None = None) -> Figure:
     """Composite strategy-comparison report: KPI strip, equity, drawdown, frontier, table.
 
     ``results`` maps ``name -> BacktestResult``; ``highlight`` maps
@@ -1231,8 +1248,9 @@ def dashboard(results: dict, returns: pd.DataFrame, *, highlight: dict | None = 
     ends = []
     for name in names:
         curve = results[name].equity_curve
-        ax1.plot(curve.index, curve.values, color=color_of[name], linewidth=2.0)
-        ends.append((float(curve.values[-1]), name, curve.index[-1]))
+        x, y = _frame_xy(curve, "equity")
+        ax1.plot(x, y, color=color_of[name], linewidth=2.0)
+        ends.append((float(y[-1]), name, x[-1]))
     ax1.axhline(1.0, color=theme.BASELINE, linewidth=1.0, zorder=0)
     ax1.margins(x=0.03)
     ax1.set_ylabel("Portfolio value")
@@ -1264,18 +1282,20 @@ def dashboard(results: dict, returns: pd.DataFrame, *, highlight: dict | None = 
     )
     for name in names:
         dd = results[name].drawdown
+        x, y = _frame_xy(dd, "drawdown")
         emph = name == best
         ax2.plot(
-            dd.index,
-            dd.values,
+            x,
+            y,
             color=color_of[name],
             linewidth=2.0 if emph else 1.1,
             alpha=1.0 if emph else 0.6,
             zorder=3 if emph else 2,
         )
+    best_x, best_y = _frame_xy(results[best].drawdown, "drawdown")
     ax2.fill_between(
-        results[best].drawdown.index,
-        results[best].drawdown.values,
+        best_x,
+        best_y,
         0,
         color=color_of[best],
         alpha=0.18,

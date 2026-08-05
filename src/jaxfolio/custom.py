@@ -97,7 +97,11 @@ class CustomStrategy:
 
         def run(returns) -> PortfolioResult:
             mu, cov, names, _mat = tk.moments(returns)
-            w = _coerce_weights(weight_fn(returns), names)
+            # A Polars panel carries its temporal key as an explicit column.
+            # User weight functions see only investable assets, matching the
+            # pre-Polars contract where dates lived outside DataFrame columns.
+            asset_frame = returns.select(names) if hasattr(returns, "select") else returns
+            w = _coerce_weights(weight_fn(asset_frame), names)
             # Only rescale to a fully-invested book when the net exposure is
             # positive. Dividing by a negative sum would flip every sign and
             # invert a net-short / dollar-neutral stance, so those are left as-is.

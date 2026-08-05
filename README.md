@@ -197,7 +197,7 @@ from jaxfolio.custom import custom_strategy, CustomStrategy
 # Mode 1 — return weights directly (a momentum tilt).
 momentum = custom_strategy(
     "momentum",
-    lambda r: np.clip(((1 + r).prod() - 1).to_numpy(), 0, None),
+    lambda r: np.clip(np.prod(1 + r.to_numpy(), axis=0) - 1, 0, None),
     register=True,
 )
 

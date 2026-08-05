@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import polars as pl
+
 import jaxfolio as jf
 from jaxfolio import viz
 from jaxfolio.backtest import compare, metrics_table
@@ -38,7 +40,7 @@ def main() -> None:
         ["annual_return", "annual_volatility", "sharpe", "max_drawdown", "avg_turnover"]
     ]
     print("\n=== Backtest metrics ===")
-    print(table.round(3).to_string())
+    print(table.with_columns(pl.selectors.numeric().round(3)))
 
     # Full-in-sample optimized portfolios for the frontier overlay.
     highlight = {

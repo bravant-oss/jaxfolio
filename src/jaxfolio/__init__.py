@@ -18,6 +18,8 @@ from jaxfolio.attribution import ConstraintReport, explain
 from jaxfolio.constraints import Box, Budget, GroupCap, GroupFloor, InfeasibleConstraints
 from jaxfolio.custom import CustomStrategy, custom_strategy
 from jaxfolio.data import (
+    asset_columns,
+    date_column,
     generate_prices,
     generate_returns,
     load_csv,
@@ -92,6 +94,8 @@ __all__ = [
     "custom_strategy",
     "CustomStrategy",
     # data
+    "asset_columns",
+    "date_column",
     "generate_prices",
     "generate_returns",
     "load_csv",

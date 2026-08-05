@@ -14,6 +14,7 @@ from pathlib import Path
 
 import jax.numpy as jnp
 import numpy as np
+import polars as pl
 
 import jaxfolio as jf
 from jaxfolio import toolkit as tk
@@ -28,8 +29,8 @@ OUT.mkdir(exist_ok=True)
 # --- Mode 1: a weight function (12-period momentum, long-only) --------------- #
 def momentum_weights(returns):
     """Weight proportional to trailing cumulative return, clipped at zero."""
-    cum = (1.0 + returns).prod() - 1.0
-    return np.clip(cum.to_numpy(), 0.0, None)
+    cum = np.prod(1.0 + returns.to_numpy(), axis=0) - 1.0
+    return np.clip(cum, 0.0, None)
 
 
 momentum = custom_strategy(
@@ -72,8 +73,10 @@ def main() -> None:
     )
 
     print("\n=== Backtest metrics ===")
-    table = metrics_table(results)[["annual_return", "annual_volatility", "sharpe", "max_drawdown"]]
-    print(table.round(3).to_string())
+    table = metrics_table(results)[
+        ["strategy", "annual_return", "annual_volatility", "sharpe", "max_drawdown"]
+    ]
+    print(table.with_columns(pl.selectors.numeric().round(3)))
 
     highlight = {
         "Momentum (custom)": momentum(returns),

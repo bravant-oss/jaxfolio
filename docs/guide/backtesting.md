@@ -58,9 +58,9 @@ holding the net-of-cost return series, the full weight history, turnover, and a
 metrics summary:
 
 ```python
-result.returns          # pd.Series of net strategy returns
-result.weights          # pd.DataFrame — dates × assets
-result.turnover         # pd.Series
+result.returns          # Polars DataFrame: date + named strategy return
+result.weights          # Polars DataFrame: date + asset weights
+result.turnover         # Polars DataFrame: date + turnover
 result.metrics          # dict of headline metrics
 result.equity_curve     # cumulative growth of $1
 result.drawdown         # underwater curve
@@ -74,6 +74,8 @@ forwarded), and [`metrics_table`](../reference/backtest.md#jaxfolio.backtest.eng
 assembles a tidy comparison frame:
 
 ```python
+import polars as pl
+
 from jaxfolio.backtest import compare, metrics_table
 
 results = compare(returns, {
@@ -87,9 +89,9 @@ results = compare(returns, {
 }, lookback=252, rebalance_every=21, transaction_cost=0.0010)
 
 table = metrics_table(results)[
-    ["annual_return", "annual_volatility", "sharpe", "max_drawdown", "avg_turnover"]
+    ["strategy", "annual_return", "annual_volatility", "sharpe", "max_drawdown", "avg_turnover"]
 ]
-print(table.round(3).to_string())
+print(table.with_columns(pl.exclude("strategy").round(3)))
 ```
 
 !!! tip "Backtesting a parameterized method"

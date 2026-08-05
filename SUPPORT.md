@@ -39,7 +39,7 @@ change ships in a minor release with a changelog note.
 ### Dependencies
 
 - We specify **minimum** versions for runtime dependencies (`jax`, `jaxlib`,
-  `optax`, `numpy`, `pandas`, `scipy`, `matplotlib`) and avoid speculative upper
+  `optax`, `numpy`, `polars`, `scipy`, `matplotlib`) and avoid speculative upper
   bounds, so jaxfolio composes cleanly in larger environments. Upper bounds are
   added only when a specific newer major is known to break us, with a rationale
   recorded inline in `pyproject.toml`.

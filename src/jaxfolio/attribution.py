@@ -77,7 +77,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    import pandas as pd
+    import polars as pl
 
     from jaxfolio.constraints.compile import CompiledConstraints
     from jaxfolio.types import PortfolioResult
@@ -591,7 +591,7 @@ class ConstraintReport:
     Four renderings, for four audiences: :meth:`explain_text` reads the report as
     prose, :meth:`to_table` lays the same facts out as fixed-width tables for a
     terminal or a log, :meth:`to_dict` / :meth:`to_json` serialize it whole for a
-    machine, and :meth:`to_frame` / :meth:`constraints_frame` hand it to pandas.
+    machine, and :meth:`to_frame` / :meth:`constraints_frame` hand it to Polars.
     All five are pure views over the same fields — none of them recompute anything.
     """
 
@@ -627,9 +627,9 @@ class ConstraintReport:
         except KeyError:
             raise KeyError(f"{asset!r} is not in this portfolio") from None
 
-    def to_frame(self) -> pd.DataFrame:
-        """Per-asset attribution as a pandas frame, indexed by asset."""
-        import pandas as pd
+    def to_frame(self) -> pl.DataFrame:
+        """Per-asset attribution as a Polars frame with an ``asset`` column."""
+        import polars as pl
 
         rows = []
         for a in self.assets_detail:
@@ -649,15 +649,15 @@ class ConstraintReport:
                     "confidence": a.confidence,
                 }
             )
-        return pd.DataFrame(rows).set_index("asset")
+        return pl.DataFrame(rows)
 
-    def constraints_frame(self) -> pd.DataFrame:
-        """Per-constraint activity and shadow price, indexed by name.
+    def constraints_frame(self) -> pl.DataFrame:
+        """Per-constraint activity and shadow price, keyed by ``name``.
 
         A different question from :meth:`to_frame`: which *constraint* is costing
         the portfolio the most, rather than what put each asset where it is.
         """
-        import pandas as pd
+        import polars as pl
 
         rows = [
             {
@@ -674,7 +674,7 @@ class ConstraintReport:
             }
             for c in self.constraints
         ]
-        return pd.DataFrame(rows).set_index("name")
+        return pl.DataFrame(rows)
 
     def explain_text(self, *, top_n: int = 10) -> str:
         """A readable rendering of the report."""

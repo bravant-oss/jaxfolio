@@ -17,8 +17,9 @@ from jaxfolio.moments.estimators import (
 
 def test_as_matrix_from_dataframe(returns):
     mat, names = as_matrix(returns)
-    assert mat.shape == (len(returns), len(returns.columns))
-    assert names == [str(c) for c in returns.columns]
+    assets = [c for c in returns.columns if c != "date"]
+    assert mat.shape == (len(returns), len(assets))
+    assert names == assets
 
 
 def test_sample_covariance_matches_numpy(returns):

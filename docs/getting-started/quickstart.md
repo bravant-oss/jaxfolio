@@ -6,15 +6,17 @@ reproducible synthetic data.
 
 ## 1. Get some returns
 
-Any wide, date-by-asset returns panel works: a pandas `DataFrame`, a NumPy
-array, or the built-in synthetic generator. Start with synthetic data so the
-results are reproducible:
+Any wide, date-by-asset returns panel works: a Polars `DataFrame`, a NumPy
+array, or the built-in synthetic generator. Polars panels keep time explicit in
+a `date` column; jaxfolio automatically excludes it from the asset matrix.
+Start with synthetic data so the results are reproducible:
 
 ```python
 import jaxfolio as jf
 
 returns = jf.generate_returns(n_assets=10, n_days=756, seed=7)
-returns.shape          # (755, 10) — one row per day, one column per asset
+returns.shape                    # (755, 11) — date + ten asset columns
+jf.asset_columns(returns)        # ['ASSET_00', ..., 'ASSET_09']
 ```
 
 To use real data instead, swap in a loader (requires the `data` extra):
@@ -63,6 +65,8 @@ walk-forward backtest — rolling window, periodic rebalance, linear transaction
 costs — for several optimizers on the same data:
 
 ```python
+import polars as pl
+
 from jaxfolio.backtest import compare, metrics_table
 
 results = compare(returns, {
@@ -72,10 +76,10 @@ results = compare(returns, {
     "1/N":         jf.equal_weight,
 }, lookback=252, rebalance_every=21, transaction_cost=0.0010)
 
-print(metrics_table(results).round(3))
+print(metrics_table(results).with_columns(pl.selectors.numeric().round(3)))
 ```
 
-`metrics_table` returns a tidy pandas frame of net-of-cost performance and risk
+`metrics_table` returns a tidy Polars frame of net-of-cost performance and risk
 metrics (annual return, volatility, Sharpe, Sortino, Calmar, max drawdown, VaR,
 CVaR, hit rate, and average turnover). See the
 [Backtesting guide](../guide/backtesting.md).

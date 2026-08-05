@@ -8,7 +8,9 @@ from jaxfolio.data.loaders import (
 )
 from jaxfolio.data.returns import (
     align,
+    asset_columns,
     clean_returns,
+    date_column,
     to_returns,
     train_test_split,
 )
@@ -22,6 +24,8 @@ __all__ = [
     "to_returns",
     "clean_returns",
     "align",
+    "asset_columns",
+    "date_column",
     "train_test_split",
     "generate_prices",
     "generate_returns",

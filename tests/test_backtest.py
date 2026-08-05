@@ -6,12 +6,20 @@ import functools
 import math
 
 import numpy as np
-import pandas as pd
+import polars as pl
 import pytest
 
 import jaxfolio as jf
 from jaxfolio.backtest import metrics as M
 from jaxfolio.backtest.engine import _accepts_holdings, backtest, compare, metrics_table
+
+
+def _assets(frame):
+    return jf.asset_columns(frame)
+
+
+def _dates(frame):
+    return frame.get_column("date").to_list()
 
 
 def test_metrics_on_known_series():
@@ -23,19 +31,19 @@ def test_metrics_on_known_series():
 
 
 def test_drawdown_is_nonpositive(returns):
-    r = returns.iloc[:, 0]
+    r = returns.get_column(_assets(returns)[0])
     dd = M.drawdown_series(r)
     assert (dd <= 1e-12).all()
 
 
 def test_cumulative_returns_start_positive(returns):
-    r = returns.iloc[:, 0]
+    r = returns.get_column(_assets(returns)[0])
     cum = M.cumulative_returns(r)
     assert cum[0] > 0
 
 
 def test_summary_keys(returns):
-    s = M.summary(returns.iloc[:, 0])
+    s = M.summary(returns.get_column(_assets(returns)[0]))
     for k in ("sharpe", "sortino", "max_drawdown", "calmar", "var_95", "cvar_95"):
         assert k in s
 
@@ -43,10 +51,10 @@ def test_summary_keys(returns):
 def test_backtest_runs_end_to_end(returns):
     res = backtest(returns, jf.equal_weight, lookback=100, rebalance_every=20)
     assert len(res.returns) > 0
-    assert res.weights.shape[1] == len(returns.columns)
+    assert len(_assets(res.weights)) == len(_assets(returns))
     assert "sharpe" in res.metrics
     # Equal-weight weights should each be ~1/N right after a rebalance.
-    assert np.isclose(res.weights.iloc[0].sum(), 1.0, atol=1e-6)
+    assert np.isclose(sum(res.weights.select(_assets(res.weights)).row(0)), 1.0, atol=1e-6)
 
 
 def test_compare_and_metrics_table(returns):
@@ -57,7 +65,7 @@ def test_compare_and_metrics_table(returns):
         rebalance_every=25,
     )
     table = metrics_table(results)
-    assert set(table.index) == {"1/N", "MinVar"}
+    assert set(table.get_column("strategy")) == {"1/N", "MinVar"}
     assert "sharpe" in table.columns
 
 
@@ -69,7 +77,9 @@ def test_transaction_costs_reduce_returns(returns):
         returns, jf.maximum_sharpe, lookback=100, rebalance_every=10, transaction_cost=0.01
     )
     # Costs can only lower cumulative performance.
-    assert with_cost.equity_curve.iloc[-1] <= no_cost.equity_curve.iloc[-1] + 1e-9
+    with_cost_final = with_cost.equity_curve.get_column("equity")[-1]
+    no_cost_final = no_cost.equity_curve.get_column("equity")[-1]
+    assert with_cost_final <= no_cost_final + 1e-9
 
 
 # --------------------------------------------------------------------------- #
@@ -89,9 +99,9 @@ def test_new_flags_are_inert_for_legacy_optimizers(returns):
     )
     default = backtest(returns, jf.maximum_sharpe, **kw)
     for other in (explicit, default):
-        pd.testing.assert_series_equal(other.returns, base.returns)
-        pd.testing.assert_frame_equal(other.weights, base.weights)
-        pd.testing.assert_series_equal(other.turnover, base.turnover)
+        assert other.returns.equals(base.returns)
+        assert other.weights.equals(base.weights)
+        assert other.turnover.equals(base.turnover)
 
 
 def test_legacy_turnover_is_recorded_only_at_rebalances(returns):
@@ -99,9 +109,9 @@ def test_legacy_turnover_is_recorded_only_at_rebalances(returns):
     lookback, every = 100, 20
     res = backtest(returns, jf.equal_weight, lookback=lookback, rebalance_every=every)
     expected = [
-        returns.index[t] for t in range(lookback, len(returns)) if (t - lookback) % every == 0
+        _dates(returns)[t] for t in range(lookback, len(returns)) if (t - lookback) % every == 0
     ]
-    assert list(res.turnover.index) == expected
+    assert _dates(res.turnover) == expected
     assert len(res.turnover) == math.ceil((len(returns) - lookback) / every)
 
 
@@ -131,7 +141,7 @@ def test_lambda_wrapper_falls_back_to_legacy(returns):
     res = backtest(returns, lambda w: spy(w), lookback=100, rebalance_every=20)
     assert calls and not any(calls), "a lambda-wrapped optimizer must not receive w_prev"
     baseline = backtest(returns, jf.equal_weight, lookback=100, rebalance_every=20)
-    pd.testing.assert_series_equal(res.returns, baseline.returns)
+    assert res.returns.equals(baseline.returns)
 
 
 def test_partial_preserves_holdings_detection(returns):
@@ -178,7 +188,7 @@ def _path_optimizer(rows):
     """Return an optimizer emitting a fixed weight path, for execution tests."""
 
     def opt(window):
-        assets = list(window.columns)
+        assets = _assets(window)
         path = np.zeros((len(rows), len(assets)))
         for i, row in enumerate(rows):
             path[i, : len(row)] = row
@@ -191,19 +201,18 @@ def _path_optimizer(rows):
 
 def test_trajectory_is_executed_between_rebalances(returns):
     """Each planned row is traded into on its own period, paying cost each time."""
-    n = len(returns.columns)
+    n = len(_assets(returns))
     rows = [[1.0], [0.0, 1.0], [0.0, 0.0, 1.0]]
     res = backtest(
         returns, _path_optimizer(rows), lookback=100, rebalance_every=20, transaction_cost=0.001
     )
-    dates = returns.index[100:103]
+    dates = _dates(returns)[100:103]
     for k, date in enumerate(dates):
         expected = np.zeros(n)
         expected[k] = 1.0
-        assert np.allclose(res.weights.loc[date].to_numpy(), expected, atol=1e-12), (
-            f"period {k} held {res.weights.loc[date].to_numpy()}"
-        )
-        assert date in res.turnover.index, f"no turnover recorded on path step {k}"
+        held = res.weights.filter(pl.col("date") == date).select(_assets(res.weights)).row(0)
+        assert np.allclose(held, expected, atol=1e-12), f"period {k} held {held}"
+        assert date in _dates(res.turnover), f"no turnover recorded on path step {k}"
 
 
 def test_follow_trajectory_false_trades_only_the_first_row(returns):
@@ -217,9 +226,10 @@ def test_follow_trajectory_false_trades_only_the_first_row(returns):
         transaction_cost=0.001,
         follow_trajectory=False,
     )
-    d1, d2 = returns.index[101], returns.index[102]
-    assert not np.allclose(res.weights.loc[d1].to_numpy()[1], 1.0)
-    assert d1 not in res.turnover.index and d2 not in res.turnover.index
+    d1, d2 = _dates(returns)[101], _dates(returns)[102]
+    held = res.weights.filter(pl.col("date") == d1).select(_assets(res.weights)).row(0)
+    assert not np.allclose(held[1], 1.0)
+    assert d1 not in _dates(res.turnover) and d2 not in _dates(res.turnover)
 
 
 def test_trajectory_truncated_by_next_rebalance(returns):
@@ -229,17 +239,16 @@ def test_trajectory_truncated_by_next_rebalance(returns):
         returns, _path_optimizer(rows), lookback=100, rebalance_every=3, transaction_cost=0.001
     )
     for t in range(100, 110, 3):  # every rebalance date resets to row 0
-        date = returns.index[t]
-        assert np.isclose(res.weights.loc[date].to_numpy()[0], 1.0, atol=1e-12), (
-            f"rebalance on {date} did not reset to row 0"
-        )
+        date = _dates(returns)[t]
+        held = res.weights.filter(pl.col("date") == date).select(_assets(res.weights)).row(0)
+        assert np.isclose(held[0], 1.0, atol=1e-12), f"rebalance on {date} did not reset to row 0"
 
 
 def test_total_cost_metric(returns):
     res = backtest(
         returns, jf.maximum_sharpe, lookback=100, rebalance_every=20, transaction_cost=0.002
     )
-    assert np.isclose(res.metrics["total_cost"], 0.002 * res.turnover.sum(), atol=1e-12)
+    assert np.isclose(res.metrics["total_cost"], 0.002 * res.turnover["turnover"].sum(), atol=1e-12)
     free = backtest(
         returns, jf.maximum_sharpe, lookback=100, rebalance_every=20, transaction_cost=0.0
     )

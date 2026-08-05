@@ -13,8 +13,8 @@ Every optimizer, built-in or custom, has the same signature:
 method(returns, ...) -> PortfolioResult
 ```
 
-`returns` is a wide returns panel (rows = periods, columns = assets) as a pandas
-`DataFrame` or a 2-D array; everything after it is method-specific configuration
+`returns` is a wide returns panel as a Polars `DataFrame` (an optional explicit
+`date` column plus numeric asset columns) or a 2-D array; everything after it is method-specific configuration
 with sensible defaults. The return value is always a
 [`PortfolioResult`](#the-portfolioresult).
 
@@ -48,8 +48,9 @@ mu, cov, names, matrix = tk.moments(returns)
 #   mean   cov    names   return matrix
 ```
 
-- `as_matrix` accepts a `DataFrame` (columns become asset names) or a raw array
-  (names default to `asset_0…`), and replaces NaNs with zeros.
+- `as_matrix` accepts a Polars `DataFrame` (numeric columns become asset names;
+  temporal columns are excluded) or a raw array (names default to `asset_0…`),
+  and replaces nulls and NaNs with zeros.
 - `mean_returns` and `sample_covariance` are the defaults, but you can pass any
   covariance estimator — the library ships [EWMA](../reference/data.md) and
   [Ledoit–Wolf shrinkage](../reference/data.md) alongside the sample estimator.

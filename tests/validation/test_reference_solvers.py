@@ -134,12 +134,14 @@ def test_hrp_matches_pypfopt(returns):
 
 
 def _as_named_frame(returns):
-    """Return ``(DataFrame, column_names)`` for the returns object."""
+    """Convert Polars to the pandas frame required by PyPortfolioOpt."""
     import pandas as pd
+    import polars as pl
 
-    if isinstance(returns, pd.DataFrame):
-        return returns, list(returns.columns)
-    raise TypeError("HRP reference test expects a pandas DataFrame of returns")
+    if isinstance(returns, pl.DataFrame):
+        names = [c for c in returns.columns if c != "date"]
+        return pd.DataFrame(returns.select(names).to_numpy(), columns=names), names
+    raise TypeError("HRP reference test expects a Polars DataFrame of returns")
 
 
 # --------------------------------------------------------------------------- #
@@ -405,7 +407,7 @@ def test_grouped_minimum_variance_matches_cvxpy(returns):
 
     mu, cov, mat = ref.moments(returns)
     n = cov.shape[0]
-    names = list(returns.columns)
+    names = [c for c in returns.columns if c != "date"]
     groups = [list(range(0, 3)), list(range(3, n))]
     caps = [0.35, 0.80]
 

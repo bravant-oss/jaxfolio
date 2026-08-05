@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
 # PyPortfolioOpt / Riskfolio-Lib build their CVXPY problems with the older ``*``
 # matmul spelling, which emits a deprecation UserWarning from inside CVXPY on
@@ -119,7 +119,7 @@ class Row:
 
 
 def run(
-    returns: pd.DataFrame, *, repeats: int = 7, warmup: int = 1
+    returns: pl.DataFrame, *, repeats: int = 7, warmup: int = 1
 ) -> tuple[list[Row], dict[tuple[str, str], np.ndarray], str]:
     """Run every available adapter on every problem; collect rows and weight vectors."""
     ctx = make_context(returns)
@@ -188,19 +188,20 @@ def run(
 # --------------------------------------------------------------------------- #
 # Reporting
 # --------------------------------------------------------------------------- #
-def print_tables(rows: list[Row], ref_name: str) -> pd.DataFrame:
+def print_tables(rows: list[Row], ref_name: str) -> pl.DataFrame:
     """Pretty-print one table per problem and return the tidy results frame."""
-    df = pd.DataFrame([r.__dict__ for r in rows])
-    df["ms"] = df["seconds"] * 1e3
+    df = pl.DataFrame([r.__dict__ for r in rows]).with_columns(
+        (pl.col("seconds") * 1e3).alias("ms")
+    )
 
     for problem in PROBLEMS:
-        sub = df[df["problem"] == problem].copy()
-        ok = sub[sub["status"] == "ok"]
-        label = ok["quality_label"].iloc[0] if len(ok) else "quality"
+        sub = df.filter(pl.col("problem") == problem)
+        ok = sub.filter(pl.col("status") == "ok")
+        label = ok.get_column("quality_label")[0] if len(ok) else "quality"
         print(f"\n=== {PROBLEM_TITLES[problem]} ===")
 
         table = []
-        for _, r in sub.iterrows():
+        for r in sub.iter_rows(named=True):
             if r["status"] != "ok":
                 table.append(
                     {
@@ -221,27 +222,29 @@ def print_tables(rows: list[Row], ref_name: str) -> pd.DataFrame:
                     "note": "",
                 }
             )
-        out = pd.DataFrame(table).set_index("library")
-        print(out.to_string(na_rep="—"))
+        print(pl.DataFrame(table))
 
     return df
 
 
-def plot_speed(df: pd.DataFrame) -> None:
+def plot_speed(df: pl.DataFrame) -> None:
     """Horizontal bar chart of median solve time per problem (log scale)."""
     import matplotlib.pyplot as plt
 
     from jaxfolio.viz import theme
 
     theme.use_dark_theme()
-    ok = df[df["status"] == "ok"]
+    ok = df.filter(pl.col("status") == "ok")
     fig, axes = plt.subplots(1, len(PROBLEMS), figsize=(15, 4.6), constrained_layout=True)
 
     for ax, problem in zip(axes, PROBLEMS, strict=True):
-        sub = ok[ok["problem"] == problem].sort_values("ms")
-        libs = sub["library"].tolist()
-        ms = sub["ms"].tolist()
-        colors = [theme.CATEGORICAL[0] if ref else theme.INK_MUTED for ref in sub["is_reference"]]
+        sub = ok.filter(pl.col("problem") == problem).sort("ms")
+        libs = sub.get_column("library").to_list()
+        ms = sub.get_column("ms").to_list()
+        colors = [
+            theme.CATEGORICAL[0] if ref else theme.INK_MUTED
+            for ref in sub.get_column("is_reference")
+        ]
         y = np.arange(len(libs))
         ax.barh(y, ms, color=colors, edgecolor=theme.SURFACE)
         ax.set_yticks(y)
@@ -306,15 +309,15 @@ def plot_weight_agreement(weights_by, ref_name: str, assets: list[str]) -> None:
 # Scenario 2 — repeated solves (a rolling-window backtest)
 # --------------------------------------------------------------------------- #
 def rolling_windows(
-    returns: pd.DataFrame, *, lookback: int = 252, step: int = 21
-) -> list[pd.DataFrame]:
+    returns: pl.DataFrame, *, lookback: int = 252, step: int = 21
+) -> list[pl.DataFrame]:
     """Trailing look-back windows on a fixed monthly rebalance cadence."""
-    return [returns.iloc[t - lookback : t] for t in range(lookback, len(returns) + 1, step)]
+    return [returns.slice(t - lookback, lookback) for t in range(lookback, len(returns) + 1, step)]
 
 
 def run_throughput(
-    returns: pd.DataFrame, *, lookback: int = 252, step: int = 21, repeats: int = 3
-) -> pd.DataFrame:
+    returns: pl.DataFrame, *, lookback: int = 252, step: int = 21, repeats: int = 3
+) -> pl.DataFrame:
     """Time each library solving every rolling window — the real backtest workload.
 
     Moments are precomputed per window (not timed) so this isolates solver
@@ -368,17 +371,17 @@ def run_throughput(
                         "status": f"error: {exc}",
                     }
                 )
-    return pd.DataFrame(rows)
+    return pl.DataFrame(rows)
 
 
-def print_throughput_tables(df: pd.DataFrame) -> None:
-    n = int(df.loc[df["status"] == "ok", "n_windows"].iloc[0])
+def print_throughput_tables(df: pl.DataFrame) -> None:
+    n = int(df.filter(pl.col("status") == "ok").get_column("n_windows")[0])
     print(f"\n\n########## Repeated solves — {n} rolling windows (a backtest) ##########")
     for problem in PROBLEMS:
-        sub = df[df["problem"] == problem]
+        sub = df.filter(pl.col("problem") == problem)
         print(f"\n=== {PROBLEM_TITLES[problem]} ===")
         table = []
-        for _, r in sub.iterrows():
+        for r in sub.iter_rows(named=True):
             ok = r["status"] == "ok"
             table.append(
                 {
@@ -388,25 +391,28 @@ def print_throughput_tables(df: pd.DataFrame) -> None:
                     "note": "" if ok else r["status"],
                 }
             )
-        print(pd.DataFrame(table).set_index("library").to_string(na_rep="—"))
+        print(pl.DataFrame(table))
 
 
-def plot_throughput(df: pd.DataFrame) -> None:
+def plot_throughput(df: pl.DataFrame) -> None:
     """Horizontal bars of amortized ms/solve over the rolling backtest (log scale)."""
     import matplotlib.pyplot as plt
 
     from jaxfolio.viz import theme
 
     theme.use_dark_theme()
-    ok = df[df["status"] == "ok"]
-    n = int(ok["n_windows"].iloc[0])
+    ok = df.filter(pl.col("status") == "ok")
+    n = int(ok.get_column("n_windows")[0])
     fig, axes = plt.subplots(1, len(PROBLEMS), figsize=(15, 4.6), constrained_layout=True)
 
     for ax, problem in zip(axes, PROBLEMS, strict=True):
-        sub = ok[ok["problem"] == problem].sort_values("per_solve_ms")
-        libs = sub["library"].tolist()
-        ms = sub["per_solve_ms"].tolist()
-        colors = [theme.CATEGORICAL[0] if ref else theme.INK_MUTED for ref in sub["is_reference"]]
+        sub = ok.filter(pl.col("problem") == problem).sort("per_solve_ms")
+        libs = sub.get_column("library").to_list()
+        ms = sub.get_column("per_solve_ms").to_list()
+        colors = [
+            theme.CATEGORICAL[0] if ref else theme.INK_MUTED
+            for ref in sub.get_column("is_reference")
+        ]
         y = np.arange(len(libs))
         ax.barh(y, ms, color=colors, edgecolor=theme.SURFACE)
         ax.set_yticks(y)
@@ -426,7 +432,7 @@ def plot_throughput(df: pd.DataFrame) -> None:
     plt.close(fig)
 
 
-def plot_hero(single_df: pd.DataFrame, tput_df: pd.DataFrame) -> None:
+def plot_hero(single_df: pl.DataFrame, tput_df: pl.DataFrame) -> None:
     """One clean summary figure (used in the README / docs): amortized ms/solve.
 
     Shows the fair, headline result — amortized solve time over a rolling
@@ -438,22 +444,25 @@ def plot_hero(single_df: pd.DataFrame, tput_df: pd.DataFrame) -> None:
     from jaxfolio.viz import theme
 
     theme.use_dark_theme()
-    ok = tput_df[tput_df["status"] == "ok"]
-    n = int(ok["n_windows"].iloc[0])
+    ok = tput_df.filter(pl.col("status") == "ok")
+    n = int(ok.get_column("n_windows")[0])
     # Agreement on the strictly-convex problems (unique optimum) where every
     # library should land on the same portfolio. Risk parity is excluded: SciPy's
     # generic SLSQP does not reach ERC, so its Δw there reflects a weaker solver,
     # not a moment/setup difference — reporting it would misstate the agreement.
-    unique_opt = single_df[
-        (single_df["status"] == "ok") & (single_df["problem"].isin(["min_variance", "max_sharpe"]))
-    ]
-    max_dw = float(unique_opt["max_weight_diff"].max())
+    unique_opt = single_df.filter(
+        (pl.col("status") == "ok") & pl.col("problem").is_in(["min_variance", "max_sharpe"])
+    )
+    max_dw = float(unique_opt.get_column("max_weight_diff").max())
 
     fig, axes = plt.subplots(1, len(PROBLEMS), figsize=(14, 4.8), constrained_layout=True)
     for ax, problem in zip(axes, PROBLEMS, strict=True):
-        sub = ok[ok["problem"] == problem].sort_values("per_solve_ms")
-        libs, ms = sub["library"].tolist(), sub["per_solve_ms"].tolist()
-        colors = [theme.CATEGORICAL[0] if r else theme.INK_MUTED for r in sub["is_reference"]]
+        sub = ok.filter(pl.col("problem") == problem).sort("per_solve_ms")
+        libs = sub.get_column("library").to_list()
+        ms = sub.get_column("per_solve_ms").to_list()
+        colors = [
+            theme.CATEGORICAL[0] if r else theme.INK_MUTED for r in sub.get_column("is_reference")
+        ]
         y = np.arange(len(libs))
         ax.barh(y, ms, color=colors, edgecolor=theme.SURFACE)
         ax.set_yticks(y)
@@ -498,7 +507,7 @@ def main() -> None:
     present = [a.name for a in available_adapters()]
     absent = missing_libraries()
     print("jaxfolio benchmark — portfolio optimization libraries")
-    print(f"  data:      {returns.shape[1]} assets x {returns.shape[0]} daily returns")
+    print(f"  data:      {len(jf.asset_columns(returns))} assets x {returns.height} daily returns")
     print(f"  comparing: {', '.join(present)}")
     if absent:
         print(f"  not installed (skipped): {', '.join(absent)}")
@@ -513,10 +522,10 @@ def main() -> None:
     tdf = run_throughput(returns_long)
     print_throughput_tables(tdf)
 
-    df.drop(columns=["quality_dir"]).to_csv(OUT / "benchmark_results.csv", index=False)
-    tdf.to_csv(OUT / "benchmark_throughput.csv", index=False)
+    df.drop("quality_dir").write_csv(OUT / "benchmark_results.csv")
+    tdf.write_csv(OUT / "benchmark_throughput.csv")
     plot_speed(df)
-    plot_weight_agreement(weights_by, ref_name, [str(c) for c in returns.columns])
+    plot_weight_agreement(weights_by, ref_name, jf.asset_columns(returns))
     plot_throughput(tdf)
     plot_hero(df, tdf)
 

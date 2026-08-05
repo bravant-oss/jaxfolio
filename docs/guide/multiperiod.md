@@ -84,7 +84,7 @@ per-period \(\mu\) and \(\Sigma\), so annualizing would double-count.
 import jaxfolio as jf
 
 returns = jf.generate_returns(n_assets=8, n_days=500, seed=42)
-holdings = ...  # what you hold right now, aligned with returns.columns
+holdings = ...  # what you hold right now, aligned with jf.asset_columns(returns)
 
 res = jf.multi_period_mean_variance(
     returns,
