@@ -8,7 +8,7 @@
 <h1 align="center">jaxfolio</h1>
 
 <p align="center">
-  Differentiable portfolio optimization & options strategies, powered by JAX.
+  Differentiable portfolio optimization and options strategies, powered by JAX.
 </p>
 
 <p align="center">
